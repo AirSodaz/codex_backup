@@ -1,0 +1,17 @@
+.env
+*.log
+restore
+restore/
+restore/**
+staging
+staging/
+staging/**
+rollback
+rollback/
+rollback/**
+tmp
+tmp/
+tmp/**
+.tmp
+.tmp/
+.tmp/**
