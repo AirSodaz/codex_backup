@@ -161,6 +161,18 @@ Applying a restore moves existing managed files to the platform app data
 rollback directory before copying restored files into place. Credentials are
 never restored.
 
+## Releases
+
+GitHub Actions builds the CLI on every push for Windows x64, Windows ARM64,
+Linux x64, Linux ARM64, macOS Intel, and macOS Apple Silicon. Normal branch
+pushes publish build artifacts on the workflow run only.
+
+Push a version tag such as `v0.1.0` to create or update a GitHub Release
+automatically. Release assets are named
+`codex-backup-<version>-<platform>.zip` on Windows and
+`codex-backup-<version>-<platform>.tar.gz` on Linux and macOS. Each release also
+includes `SHA256SUMS.txt`.
+
 ## Tests
 
 Run the local Rust test suite:

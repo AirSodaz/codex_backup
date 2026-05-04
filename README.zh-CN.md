@@ -262,6 +262,16 @@ codex-backup restore --apply
 
 Restic 仓库密码独立于 R2 密钥。丢失 Restic 密码会导致已有备份无法解密，建议使用系统 keyring 或安全的密码管理器保存。
 
+## 发布
+
+GitHub Actions 会在每次 push 时为 Windows x64、Windows ARM64、Linux x64、Linux ARM64、macOS Intel 和 macOS Apple Silicon 构建 CLI。普通分支 push 只会在对应
+workflow run 中保留构建 artifacts。
+
+推送 `v0.1.0` 这类版本 tag 时，workflow 会自动创建或更新 GitHub Release。发布产物命名为 Windows 上的
+`codex-backup-<version>-<platform>.zip`，以及 Linux / macOS 上的
+`codex-backup-<version>-<platform>.tar.gz`。每个 release 还会附带
+`SHA256SUMS.txt`。
+
 ## 开发与验证
 
 运行测试：
