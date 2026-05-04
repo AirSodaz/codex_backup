@@ -1,5 +1,7 @@
 # Codex R2 Backup
 
+[中文说明](README.zh-CN.md)
+
 Cross-platform Rust CLI for backing up local Codex history, memories, and SQLite
 state to Cloudflare R2 through Restic.
 
