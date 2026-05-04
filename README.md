@@ -1,57 +1,74 @@
 # Codex R2 Backup
 
-PowerShell tooling for backing up local Codex history, memories, and SQLite state to Cloudflare R2 through Restic.
+Cross-platform Rust CLI for backing up local Codex history, memories, and SQLite
+state to Cloudflare R2 through Restic.
 
 ## What Gets Backed Up
 
-Included from `%USERPROFILE%\.codex`:
+Included from the default Codex directory at `~/.codex`:
 
 - `sessions`
 - `archived_sessions`
 - `session_index.jsonl`
 - `history.jsonl`
 - `memories`
-- `logs_*.sqlite` and `state_*.sqlite` through `sqlite3 .backup`
+- root `logs_*.sqlite` and `state_*.sqlite` files through SQLite online backup
 
 Intentionally excluded:
 
 - `auth.json`
 - `.sandbox-secrets`
-- cache, temp, plugin cache, sandbox, and worktree directories
+- cache, temp, plugin cache, sandbox, vendor import, and worktree directories
 
-The scripts stage a clean backup directory first. Active SQLite databases are not copied directly; each root `logs_*.sqlite` and `state_*.sqlite` file is captured with SQLite's online backup command.
+The CLI stages a clean backup directory first. Active SQLite databases are not
+copied directly; each managed root SQLite file is captured with SQLite's online
+backup API.
 
 ## Setup
 
-1. Install or check required tools:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-tools.ps1
-```
+1. Install Rust and Restic.
 
 2. Copy `.env.example` to `.env` and fill in the R2 values. Keep `.env` private.
 
-3. Initialize the Restic repository and save the Restic password with Windows DPAPI:
+3. Check local readiness:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init-repo.ps1
+cargo run -- doctor
 ```
+
+4. Save the Restic repository password to the system keyring and initialize the
+   repository:
+
+```powershell
+cargo run -- init --set-password
+```
+
+The Rust CLI uses the platform credential store by default: Windows Credential
+Manager, macOS Keychain, or Linux Secret Service. For CI or headless runs, set
+`RESTIC_PASSWORD` or pass `--password-file`.
 
 ## Back Up
 
 Run a normal backup:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup-codex.ps1
+cargo run -- backup
 ```
 
 Run a local staging dry run without Restic upload:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup-codex.ps1 -SkipRestic -KeepStaging
+cargo run -- backup --skip-restic --keep-staging
 ```
 
-Restic retention is applied after successful upload:
+Use a non-default Codex directory for testing:
+
+```powershell
+cargo run -- backup --skip-restic --keep-staging --codex-dir C:\path\to\.codex
+```
+
+Restic snapshots are tagged with `codex` and the current platform tag:
+`windows`, `macos`, or `linux`. Retention is applied after successful upload:
 
 - keep 7 daily snapshots
 - keep 4 weekly snapshots
@@ -59,24 +76,36 @@ Restic retention is applied after successful upload:
 
 ## Schedule
 
-Register a daily 03:00 Windows scheduled task:
+Install a daily 03:00 backup schedule:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-schedule.ps1
+cargo run -- schedule install --time 03:00
 ```
+
+Remove the schedule:
+
+```powershell
+cargo run -- schedule remove
+```
+
+The CLI uses the native scheduler for each platform:
+
+- Windows: Task Scheduler through `schtasks.exe`
+- macOS: user LaunchAgent
+- Linux: systemd user service and timer
 
 ## Check Repository
 
 Run snapshots, repository check, and retention pruning:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-repo.ps1
+cargo run -- check
 ```
 
 Skip pruning during a read-only check:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-repo.ps1 -SkipPrune
+cargo run -- check --skip-prune
 ```
 
 ## Restore
@@ -84,21 +113,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-repo.ps1 -Sk
 Restore the latest snapshot into a temporary directory only:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-codex.ps1
+cargo run -- restore
 ```
 
-Apply a restored snapshot to `%USERPROFILE%\.codex` only after closing Codex:
+Apply a restored snapshot to `~/.codex` only after closing Codex:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-codex.ps1 -Apply
+cargo run -- restore --apply
 ```
 
-Applying a restore moves existing managed files to `%APPDATA%\codex-backup\rollback` before copying restored files into place. Credentials are never restored.
+Applying a restore moves existing managed files to the platform app data
+rollback directory before copying restored files into place. Credentials are
+never restored.
 
 ## Tests
 
-Run the local test suite:
+Run the local Rust test suite:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
+cargo test
+```
+
+Run the full local verification set:
+
+```powershell
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
