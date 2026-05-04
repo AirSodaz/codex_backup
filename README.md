@@ -43,14 +43,29 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-The installer checks or installs Rust, Restic, and the `codex-backup` CLI. It
-then prompts for R2 or `RESTIC_REPOSITORY` settings, writes the private `.env`
-file to the platform app data directory, saves the Restic repository password to
-the system keyring, and initializes the Restic repository.
+The installer checks or installs Restic, downloads the latest matching
+`codex-backup` GitHub Release by default, and adds the managed install directory
+to PATH. It then prompts for R2 or `RESTIC_REPOSITORY` settings, writes the
+private `.env` file to the platform app data directory, saves the Restic
+repository password to the system keyring, and initializes the Restic repository.
+Rust is not required for the default release-based install.
 
 Existing `.env` files are preserved by default. Pass `-ForceEnv` on Windows or
 `--force-env` on macOS/Linux to replace them. Pass `-SkipInit` or `--skip-init`
-to install the CLI without interactive repository setup.
+to install the CLI without interactive repository setup. To pin a release, pass
+`-ReleaseVersion v0.1.0` on Windows or `--release-version v0.1.0` on
+macOS/Linux.
+
+To build the CLI locally from source instead of downloading a release, opt in to
+source mode. This path installs or checks Rust and then runs `cargo install`:
+
+```powershell
+.\scripts\install.ps1 -InstallMode Source
+```
+
+```sh
+./scripts/install.sh --install-mode source
+```
 
 To install the daily backup schedule during setup, opt in explicitly:
 
@@ -63,7 +78,7 @@ To install the daily backup schedule during setup, opt in explicitly:
 ```
 
 For manual development or troubleshooting, install Rust and Restic yourself,
-then install the CLI and initialize it:
+then install the CLI from the current checkout and initialize it:
 
 ```powershell
 cargo install --path . --locked --force --bin codex-backup

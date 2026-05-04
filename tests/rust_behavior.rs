@@ -284,6 +284,8 @@ fn install_scripts_expose_planned_interfaces() {
         "DryRun",
         "InstallSchedule",
         "ScheduleTime",
+        "InstallMode",
+        "ReleaseVersion",
     ] {
         assert!(windows.contains(flag), "install.ps1 missing {flag}");
     }
@@ -295,9 +297,32 @@ fn install_scripts_expose_planned_interfaces() {
         "--dry-run",
         "--install-schedule",
         "--schedule-time",
+        "--install-mode",
+        "--release-version",
     ] {
         assert!(unix.contains(flag), "install.sh missing {flag}");
     }
+
+    assert!(windows.contains("ValidateSet(\"Release\", \"Source\")"));
+    assert!(windows.contains("AirSodaz/codex_backup"));
+    assert!(windows.contains("releases/latest"));
+    assert!(windows.contains("SHA256SUMS.txt"));
+    assert!(windows.contains("windows-x86_64"));
+    assert!(windows.contains("windows-aarch64"));
+    assert!(windows.contains("codex-backup\\bin"));
+    assert!(windows.contains("Expand-Archive"));
+    assert!(windows.contains("Get-FileHash"));
+
+    assert!(unix.contains("install_mode=release"));
+    assert!(unix.contains("AirSodaz/codex_backup"));
+    assert!(unix.contains("releases/latest"));
+    assert!(unix.contains("SHA256SUMS.txt"));
+    assert!(unix.contains("linux-x86_64"));
+    assert!(unix.contains("linux-aarch64"));
+    assert!(unix.contains("macos-x86_64"));
+    assert!(unix.contains("macos-aarch64"));
+    assert!(unix.contains("BEGIN codex-backup PATH"));
+    assert!(unix.contains("sha256sum -c"));
 
     assert!(windows.contains("Rustlang.Rustup"));
     assert!(windows.contains("restic.restic"));

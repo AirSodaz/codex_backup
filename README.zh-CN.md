@@ -47,14 +47,27 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-安装脚本会检查或安装 Rust、Restic 和 `codex-backup` CLI，然后交互式询问 R2
-或 `RESTIC_REPOSITORY` 配置，把私有 `.env` 写到平台应用数据目录，并通过
+安装脚本会检查或安装 Restic，并默认下载匹配当前平台和架构的最新 GitHub
+Release 版 `codex-backup`，再把托管安装目录加入 PATH。随后脚本会交互式询问
+R2 或 `RESTIC_REPOSITORY` 配置，把私有 `.env` 写到平台应用数据目录，并通过
 `codex-backup init --set-password` 把 Restic 仓库密码保存到系统凭据管理器、
-初始化仓库。
+初始化仓库。默认 release 安装不需要 Rust。
 
 已有 `.env` 默认不会被覆盖；Windows 传 `-ForceEnv`、macOS/Linux 传
 `--force-env` 才会重写。只想安装依赖和 CLI、不做交互初始化时，可以传
-`-SkipInit` 或 `--skip-init`。
+`-SkipInit` 或 `--skip-init`。如需固定版本，Windows 传
+`-ReleaseVersion v0.1.0`，macOS/Linux 传 `--release-version v0.1.0`。
+
+如果希望从当前源码构建 CLI，而不是下载 release，可以显式启用 source 模式。
+这个路径会检查或安装 Rust，并执行 `cargo install`：
+
+```powershell
+.\scripts\install.ps1 -InstallMode Source
+```
+
+```sh
+./scripts/install.sh --install-mode source
+```
 
 如需安装每天 03:00 自动备份计划，需要显式开启：
 
@@ -66,7 +79,7 @@ chmod +x scripts/install.sh
 ./scripts/install.sh --install-schedule --schedule-time 03:00
 ```
 
-手动开发或排障时，也可以自己安装 Rust 和 Restic，然后安装 CLI：
+手动开发或排障时，也可以自己安装 Rust 和 Restic，然后从当前 checkout 安装 CLI：
 
 ```powershell
 cargo install --path . --locked --force --bin codex-backup
