@@ -28,21 +28,54 @@ backup API.
 
 ## Setup
 
-1. Install Rust and Restic.
+Run the installer from the repository root.
 
-2. Copy `.env.example` to `.env` and fill in the R2 values. Keep `.env` private.
-
-3. Check local readiness:
+Windows:
 
 ```powershell
-cargo run -- doctor
+.\scripts\install.ps1
 ```
 
-4. Save the Restic repository password to the system keyring and initialize the
-   repository:
+macOS and Linux:
+
+```sh
+chmod +x scripts/install.sh
+./scripts/install.sh
+```
+
+The installer checks or installs Rust, Restic, and the `codex-backup` CLI. It
+then prompts for R2 or `RESTIC_REPOSITORY` settings, writes the private `.env`
+file to the platform app data directory, saves the Restic repository password to
+the system keyring, and initializes the Restic repository.
+
+Existing `.env` files are preserved by default. Pass `-ForceEnv` on Windows or
+`--force-env` on macOS/Linux to replace them. Pass `-SkipInit` or `--skip-init`
+to install the CLI without interactive repository setup.
+
+To install the daily backup schedule during setup, opt in explicitly:
 
 ```powershell
-cargo run -- init --set-password
+.\scripts\install.ps1 -InstallSchedule -ScheduleTime 03:00
+```
+
+```sh
+./scripts/install.sh --install-schedule --schedule-time 03:00
+```
+
+For manual development or troubleshooting, install Rust and Restic yourself,
+then install the CLI and initialize it:
+
+```powershell
+cargo install --path . --locked --force --bin codex-backup
+Copy-Item .env.example .env
+codex-backup doctor --env-file .env
+codex-backup init --set-password --env-file .env
+```
+
+Check local readiness:
+
+```powershell
+codex-backup doctor
 ```
 
 The Rust CLI uses the platform credential store by default: Windows Credential
@@ -54,19 +87,19 @@ Manager, macOS Keychain, or Linux Secret Service. For CI or headless runs, set
 Run a normal backup:
 
 ```powershell
-cargo run -- backup
+codex-backup backup
 ```
 
 Run a local staging dry run without Restic upload:
 
 ```powershell
-cargo run -- backup --skip-restic --keep-staging
+codex-backup backup --skip-restic --keep-staging
 ```
 
 Use a non-default Codex directory for testing:
 
 ```powershell
-cargo run -- backup --skip-restic --keep-staging --codex-dir C:\path\to\.codex
+codex-backup backup --skip-restic --keep-staging --codex-dir C:\path\to\.codex
 ```
 
 Restic snapshots are tagged with `codex` and the current platform tag:
@@ -81,13 +114,13 @@ Restic snapshots are tagged with `codex` and the current platform tag:
 Install a daily 03:00 backup schedule:
 
 ```powershell
-cargo run -- schedule install --time 03:00
+codex-backup schedule install --time 03:00
 ```
 
 Remove the schedule:
 
 ```powershell
-cargo run -- schedule remove
+codex-backup schedule remove
 ```
 
 The CLI uses the native scheduler for each platform:
@@ -101,13 +134,13 @@ The CLI uses the native scheduler for each platform:
 Run snapshots, repository check, and retention pruning:
 
 ```powershell
-cargo run -- check
+codex-backup check
 ```
 
 Skip pruning during a read-only check:
 
 ```powershell
-cargo run -- check --skip-prune
+codex-backup check --skip-prune
 ```
 
 ## Restore
@@ -115,13 +148,13 @@ cargo run -- check --skip-prune
 Restore the latest snapshot into a temporary directory only:
 
 ```powershell
-cargo run -- restore
+codex-backup restore
 ```
 
 Apply a restored snapshot to `~/.codex` only after closing Codex:
 
 ```powershell
-cargo run -- restore --apply
+codex-backup restore --apply
 ```
 
 Applying a restore moves existing managed files to the platform app data

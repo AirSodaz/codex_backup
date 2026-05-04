@@ -269,3 +269,43 @@ fn scheduler_generators_cover_windows_launchd_and_systemd() {
     assert!(systemd.timer.contains("OnCalendar=*-*-* 03:00:00"));
     assert!(systemd.timer.contains("Persistent=true"));
 }
+
+#[test]
+fn install_scripts_expose_planned_interfaces() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let windows = fs::read_to_string(repo_root.join("scripts/install.ps1")).unwrap();
+    let unix = fs::read_to_string(repo_root.join("scripts/install.sh")).unwrap();
+    let git_attributes = fs::read_to_string(repo_root.join(".gitattributes")).unwrap();
+
+    for flag in [
+        "SkipDeps",
+        "SkipInit",
+        "ForceEnv",
+        "DryRun",
+        "InstallSchedule",
+        "ScheduleTime",
+    ] {
+        assert!(windows.contains(flag), "install.ps1 missing {flag}");
+    }
+
+    for flag in [
+        "--skip-deps",
+        "--skip-init",
+        "--force-env",
+        "--dry-run",
+        "--install-schedule",
+        "--schedule-time",
+    ] {
+        assert!(unix.contains(flag), "install.sh missing {flag}");
+    }
+
+    assert!(windows.contains("Rustlang.Rustup"));
+    assert!(windows.contains("restic.restic"));
+    assert!(unix.contains("rustup.rs"));
+    assert!(unix.contains("brew install restic"));
+    assert!(unix.contains("cargo install --path"));
+    assert!(windows.contains("Invoke-External \"cargo\""));
+    assert!(windows.contains("\"install\""));
+    assert!(windows.contains("\"--path\""));
+    assert!(git_attributes.contains("*.sh text eol=lf"));
+}
