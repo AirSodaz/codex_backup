@@ -1,0 +1,167 @@
+name: Build and Release CLI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BIN_NAME: codex-backup
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy rustfmt
+          rustup default stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  build:
+    name: Build (${{ matrix.label }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2025
+            target: windows-x86_64
+          - label: Windows ARM64
+            os: windows-11-arm
+            target: windows-aarch64
+          - label: Linux x64
+            os: ubuntu-24.04
+            target: linux-x86_64
+          - label: Linux ARM64
+            os: ubuntu-24.04-arm
+            target: linux-aarch64
+          - label: macOS Intel
+            os: macos-15-intel
+            target: macos-x86_64
+          - label: macOS Apple Silicon
+            os: macos-15
+            target: macos-aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME.StartsWith("v")) {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+            $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+            $package = $metadata.packages | Where-Object { $_.name -eq $env:BIN_NAME } | Select-Object -First 1
+            if (-not $package) {
+              throw "Package '$env:BIN_NAME' was not found in cargo metadata."
+            }
+            $version = $package.version
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked --bin codex-backup
+
+      - name: Package artifact
+        id: package
+        shell: pwsh
+        run: |
+          $packageName = "${{ env.BIN_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          $packageDir = Join-Path "dist" $packageName
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+          if ($IsWindows) {
+            Copy-Item -Path "target/release/${{ env.BIN_NAME }}.exe" -Destination $packageDir
+          } else {
+            Copy-Item -Path "target/release/${{ env.BIN_NAME }}" -Destination $packageDir
+          }
+          Copy-Item -Path "README.md", "README.zh-CN.md" -Destination $packageDir
+
+          if ($IsWindows) {
+            $asset = "dist/$packageName.zip"
+            Compress-Archive -Path $packageDir -DestinationPath $asset -Force
+          } else {
+            $asset = "dist/$packageName.tar.gz"
+            tar -czf $asset -C "dist" $packageName
+          }
+
+          "asset=$asset" >> $env:GITHUB_OUTPUT
+          "asset_name=$(Split-Path -Leaf $asset)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset_name }}
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - quality
+      - build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256 sums
+        run: |
+          cd dist
+          sha256sum codex-backup-* > SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=(dist/codex-backup-* dist/SHA256SUMS.txt)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          fi
