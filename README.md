@@ -44,18 +44,30 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-The installer checks or installs Restic, downloads the latest matching
-`codex-backup` GitHub Release by default, and adds the managed install directory
-to PATH. It defaults to a local Restic repository in the platform app data
-directory, then saves the Restic repository password to the system keyring and
-initializes the repository. You can opt into a custom local path or R2/S3 during
-setup. Rust is not required for the default release-based install.
+The installer now starts as an interactive wizard. It shows the target paths,
+lets you choose the CLI source, asks how to configure the Restic repository,
+and asks whether to initialize the repository and install a daily backup
+schedule before it changes anything. The safe defaults are the latest matching
+`codex-backup` GitHub Release, the managed install directory on PATH, the
+default local Restic repository, repository initialization, and no daily
+schedule. Rust is not required for the default release-based install.
 
 Existing `.env` files are preserved by default. Pass `-ForceEnv` on Windows or
 `--force-env` on macOS/Linux to replace them. Pass `-SkipInit` or `--skip-init`
-to install the CLI without interactive repository setup. To pin a release, pass
-`-ReleaseVersion v0.1.0` on Windows or `--release-version v0.1.0` on
-macOS/Linux.
+to install the CLI without repository setup. For CI or unattended installs,
+combine the safe defaults with `-Yes` / `--yes` and usually `-SkipInit` /
+`--skip-init` so the Restic password prompt is deferred:
+
+```powershell
+.\scripts\install.ps1 -Yes -SkipInit
+```
+
+```sh
+./scripts/install.sh --yes --skip-init
+```
+
+To pin a release, pass `-ReleaseVersion v0.1.0` on Windows or
+`--release-version v0.1.0` on macOS/Linux.
 
 To build the CLI locally from source instead of downloading a release, opt in to
 source mode. This path installs or checks Rust and then runs `cargo install`:

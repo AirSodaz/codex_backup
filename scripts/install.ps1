@@ -7,6 +7,7 @@ param(
     [switch]$SkipInit,
     [switch]$ForceEnv,
     [switch]$DryRun,
+    [switch]$Yes,
     [switch]$InstallSchedule,
     [ValidatePattern('^\d{2}:\d{2}$')]
     [string]$ScheduleTime = "03:00"
@@ -14,6 +15,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$InstallModeExplicit = $PSBoundParameters.ContainsKey("InstallMode")
+$ReleaseVersionExplicit = $PSBoundParameters.ContainsKey("ReleaseVersion")
+$SkipInitExplicit = $PSBoundParameters.ContainsKey("SkipInit")
+$InstallScheduleExplicit = $PSBoundParameters.ContainsKey("InstallSchedule")
+$ScheduleTimeExplicit = $PSBoundParameters.ContainsKey("ScheduleTime")
 
 $GitHubRepository = "AirSodaz/codex_backup"
 $ReleaseApiBase = "https://api.github.com/repos/$GitHubRepository/releases"
@@ -495,6 +502,134 @@ function Read-YesNoDefault {
     }
 }
 
+function Test-InteractiveInput {
+    if ($DryRun -or $Yes) {
+        return $false
+    }
+
+    try {
+        if ([Console]::IsInputRedirected) {
+            return $false
+        }
+    } catch {
+        return [Environment]::UserInteractive
+    }
+
+    return [Environment]::UserInteractive
+}
+
+function Assert-InteractiveInput {
+    if (-not (Test-InteractiveInput)) {
+        throw "Non-interactive install requires -Yes, -SkipInit, or explicit parameters."
+    }
+}
+
+function Read-MenuChoice {
+    param(
+        [string]$Prompt,
+        [string]$Default,
+        [string[]]$Choices
+    )
+
+    while ($true) {
+        $value = Read-WithDefault $Prompt $Default
+        if ($Choices -contains $value) {
+            return $value
+        }
+        Write-WarningLine "Please choose one of: $($Choices -join ', ')."
+    }
+}
+
+function Write-InstallPlanSummary {
+    param([string]$EnvPath)
+
+    Write-Step "Installation plan"
+    Write-Host "  CLI install source: $InstallMode"
+    if ($InstallMode -eq "Release") {
+        Write-Host "  Release version: $ReleaseVersion"
+        Write-Host "  Managed bin dir: $(Get-ManagedBinDir)"
+    } else {
+        Write-Host "  Source checkout: $(Get-RepoRoot)"
+        Write-Host "  Cargo bin dir: $(Join-Path $HOME '.cargo\bin')"
+    }
+    Write-Host "  Environment file: $EnvPath"
+    Write-Host "  Initialize repository now: $(-not $SkipInit)"
+    Write-Host "  Install daily backup schedule: $InstallSchedule"
+    if ($InstallSchedule) {
+        Write-Host "  Schedule time: $ScheduleTime"
+    }
+}
+
+function Resolve-InteractiveInstallPlan {
+    param([string]$EnvPath)
+
+    Write-Step "codex-backup interactive installer"
+    Write-Host "This wizard installs codex-backup, prepares Restic, and can initialize your repository."
+    Write-Host "Defaults: latest GitHub Release, default local Restic repository, no daily schedule."
+
+    if ($DryRun -or $Yes) {
+        Write-Step "Using default non-interactive install plan where options were not provided"
+        Write-InstallPlanSummary $EnvPath
+        return
+    }
+
+    if (-not (Test-InteractiveInput)) {
+        throw "Non-interactive install requires -Yes, -SkipInit, or explicit parameters."
+    }
+
+    if (-not $InstallModeExplicit) {
+        Write-Step "Select codex-backup CLI install source"
+        Write-Host "  1) Latest GitHub Release"
+        Write-Host "  2) Specific GitHub Release"
+        Write-Host "  3) Build from source"
+        $choice = Read-MenuChoice "Choose install source" "1" @("1", "2", "3")
+        switch ($choice) {
+            "1" {
+                $script:InstallMode = "Release"
+                if (-not $ReleaseVersionExplicit) {
+                    $script:ReleaseVersion = "latest"
+                }
+            }
+            "2" {
+                $script:InstallMode = "Release"
+                if (-not $ReleaseVersionExplicit) {
+                    $script:ReleaseVersion = Read-Required "GitHub release tag (for example v0.1.0)"
+                }
+            }
+            "3" {
+                $script:InstallMode = "Source"
+            }
+        }
+    }
+
+    if (-not $SkipInitExplicit) {
+        if (-not (Read-YesNoDefault "Initialize the Restic repository now" $true)) {
+            $script:SkipInit = $true
+        }
+    }
+
+    if (-not $InstallScheduleExplicit) {
+        if (Read-YesNoDefault "Install daily backup schedule" $false) {
+            $script:InstallSchedule = $true
+        }
+    }
+
+    if ($InstallSchedule -and -not $ScheduleTimeExplicit) {
+        while ($true) {
+            $script:ScheduleTime = Read-WithDefault "Daily backup time (HH:MM)" $ScheduleTime
+            if ($ScheduleTime -match '^([01]\d|2[0-3]):[0-5]\d$') {
+                break
+            }
+            Write-WarningLine "Schedule time must use HH:MM with a valid 24-hour time."
+        }
+    }
+
+    Write-InstallPlanSummary $EnvPath
+    if (-not (Read-YesNoDefault "Proceed with this installation" $true)) {
+        throw "Installation cancelled."
+    }
+}
+
 function Test-S3Repository {
     param([string]$Repository)
     return $Repository.Trim().StartsWith("s3:", [StringComparison]::OrdinalIgnoreCase)
@@ -521,37 +656,62 @@ function Write-EnvFile {
     }
 
     if ($DryRun) {
-        Write-Step "Would prompt for local or remote Restic settings and write $EnvPath"
+        Write-Step "Would prompt with Select Restic repository menu and write $EnvPath"
+        Write-Host "[dry-run] Select Restic repository"
+        Write-Host "[dry-run] 1) Default local repository"
+        Write-Host "[dry-run] 2) Custom local repository path"
+        Write-Host "[dry-run] 3) S3/R2 repository URL"
+        Write-Host "[dry-run] 4) Legacy Cloudflare R2 fields"
         return
+    }
+
+    if (-not $Yes) {
+        Assert-InteractiveInput
     }
 
     $parent = Split-Path -Parent $EnvPath
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
 
     Write-Step "Creating .env at $EnvPath"
-    $useLocal = Read-YesNoDefault "Use default local Restic repository" $true
     $lines = @("# Generated by scripts/install.ps1.")
 
-    if ($useLocal) {
+    if ($Yes) {
         $lines += "# Default local Restic repository will be used because RESTIC_REPOSITORY is not set."
     } else {
-        $repository = Read-Host -Prompt "RESTIC_REPOSITORY (enter a local path or s3: URL; leave blank to build it from R2 fields)"
-        if (-not [string]::IsNullOrWhiteSpace($repository)) {
-            $repository = $repository.Trim()
-            $lines += Format-EnvLine "RESTIC_REPOSITORY" $repository
-            if (Test-S3Repository $repository) {
+        Write-Step "Select Restic repository"
+        Write-Host "  1) Default local repository"
+        Write-Host "  2) Custom local repository path"
+        Write-Host "  3) S3/R2 repository URL"
+        Write-Host "  4) Legacy Cloudflare R2 fields"
+        Write-Host "Use default local Restic repository by choosing 1."
+        $repositoryChoice = Read-MenuChoice "Choose repository type" "1" @("1", "2", "3", "4")
+
+        switch ($repositoryChoice) {
+            "1" {
+                $lines += "# Default local Restic repository will be used because RESTIC_REPOSITORY is not set."
+            }
+            "2" {
+                $lines += Format-EnvLine "RESTIC_REPOSITORY" (Read-Required "Custom local RESTIC_REPOSITORY path")
+            }
+            "3" {
+                $repository = Read-Required "S3/R2 RESTIC_REPOSITORY URL (must start with s3:)"
+                if (-not (Test-S3Repository $repository)) {
+                    throw "S3/R2 RESTIC_REPOSITORY must start with s3:."
+                }
+                $lines += Format-EnvLine "RESTIC_REPOSITORY" $repository
                 $lines += Format-EnvLine "R2_ACCESS_KEY_ID" (Read-Required "R2_ACCESS_KEY_ID")
                 $lines += Format-EnvLine "R2_SECRET_ACCESS_KEY" (Read-Required "R2_SECRET_ACCESS_KEY" -Secret)
                 $lines += Format-EnvLine "R2_REGION" (Read-WithDefault "R2_REGION" "auto")
             }
-        } else {
-            $lines += Format-EnvLine "R2_ACCOUNT_ID" (Read-Required "R2_ACCOUNT_ID")
-            $lines += Format-EnvLine "R2_BUCKET" (Read-Required "R2_BUCKET")
-            $lines += Format-EnvLine "R2_PREFIX" (Read-WithDefault "R2_PREFIX" "codex/history")
-            $lines += ""
-            $lines += Format-EnvLine "R2_ACCESS_KEY_ID" (Read-Required "R2_ACCESS_KEY_ID")
-            $lines += Format-EnvLine "R2_SECRET_ACCESS_KEY" (Read-Required "R2_SECRET_ACCESS_KEY" -Secret)
-            $lines += Format-EnvLine "R2_REGION" (Read-WithDefault "R2_REGION" "auto")
+            "4" {
+                $lines += Format-EnvLine "R2_ACCOUNT_ID" (Read-Required "R2_ACCOUNT_ID")
+                $lines += Format-EnvLine "R2_BUCKET" (Read-Required "R2_BUCKET")
+                $lines += Format-EnvLine "R2_PREFIX" (Read-WithDefault "R2_PREFIX" "codex/history")
+                $lines += ""
+                $lines += Format-EnvLine "R2_ACCESS_KEY_ID" (Read-Required "R2_ACCESS_KEY_ID")
+                $lines += Format-EnvLine "R2_SECRET_ACCESS_KEY" (Read-Required "R2_SECRET_ACCESS_KEY" -Secret)
+                $lines += Format-EnvLine "R2_REGION" (Read-WithDefault "R2_REGION" "auto")
+            }
         }
     }
 
@@ -606,6 +766,9 @@ function Install-ScheduleIfRequested {
 
 Add-CargoPath
 Add-InstallBinPath
+$envPath = Get-DefaultEnvPath
+
+Resolve-InteractiveInstallPlan $envPath
 
 if ($SkipDeps) {
     Write-Step "Skipping dependency installation"
@@ -619,7 +782,6 @@ if ($SkipDeps) {
 }
 
 Install-Cli
-$envPath = Get-DefaultEnvPath
 Initialize-Repository $envPath
 Run-Doctor $envPath
 Install-ScheduleIfRequested $envPath

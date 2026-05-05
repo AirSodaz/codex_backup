@@ -47,16 +47,27 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-安装脚本会检查或安装 Restic，并默认下载匹配当前平台和架构的最新 GitHub
-Release 版 `codex-backup`，再把托管安装目录加入 PATH。随后脚本默认选择本机
-Restic 仓库，把 Restic 仓库密码保存到系统凭据管理器，并通过
-`codex-backup init --set-password` 初始化仓库。若需要自定义本机路径或 R2/S3，
-可以在安装时选择远端/自定义配置。默认 release 安装不需要 Rust。
+安装脚本现在默认进入交互式向导。它会先展示安装路径和配置摘要，再让你选择
+CLI 来源、Restic 仓库类型、是否立即初始化仓库，以及是否安装每天自动备份计划。
+安全默认值是：下载匹配当前平台和架构的最新 GitHub Release、把托管安装目录加入
+PATH、使用默认本机 Restic 仓库、立即初始化仓库、不安装自动计划任务。默认
+release 安装不需要 Rust。
 
 已有 `.env` 默认不会被覆盖；Windows 传 `-ForceEnv`、macOS/Linux 传
-`--force-env` 才会重写。只想安装依赖和 CLI、不做交互初始化时，可以传
-`-SkipInit` 或 `--skip-init`。如需固定版本，Windows 传
-`-ReleaseVersion v0.1.0`，macOS/Linux 传 `--release-version v0.1.0`。
+`--force-env` 才会重写。只想安装依赖和 CLI、不做仓库初始化时，可以传
+`-SkipInit` 或 `--skip-init`。CI 或无人值守安装建议显式使用安全默认值，并把
+Restic 密码提示留到之后处理：
+
+```powershell
+.\scripts\install.ps1 -Yes -SkipInit
+```
+
+```sh
+./scripts/install.sh --yes --skip-init
+```
+
+如需固定版本，Windows 传 `-ReleaseVersion v0.1.0`，macOS/Linux 传
+`--release-version v0.1.0`。
 
 如果希望从当前源码构建 CLI，而不是下载 release，可以显式启用 source 模式。
 这个路径会检查或安装 Rust，并执行 `cargo install`：

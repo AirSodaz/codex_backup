@@ -7,9 +7,15 @@ skip_deps=0
 skip_init=0
 force_env=0
 dry_run=0
+yes=0
 install_schedule=0
 schedule_time=03:00
 tmp_dir=
+explicit_install_mode=0
+explicit_release_version=0
+explicit_skip_init=0
+explicit_install_schedule=0
+explicit_schedule_time=0
 
 github_repository=AirSodaz/codex_backup
 release_api_base=https://api.github.com/repos/$github_repository/releases
@@ -25,6 +31,7 @@ Options:
   --skip-init          Do not prompt for .env values or initialize Restic.
   --force-env          Overwrite an existing generated .env file.
   --dry-run            Print commands without executing them.
+  --yes                Use safe defaults without prompting.
   --install-schedule   Install the daily native backup schedule.
   --schedule-time HH:MM
                        Time for --install-schedule. Defaults to 03:00.
@@ -129,17 +136,20 @@ while [ "$#" -gt 0 ]; do
             shift
             [ "$#" -gt 0 ] || die "--install-mode requires release or source."
             install_mode=$1
+            explicit_install_mode=1
             ;;
         --release-version)
             shift
             [ "$#" -gt 0 ] || die "--release-version requires latest or a tag such as v0.1.0."
             release_version=$1
+            explicit_release_version=1
             ;;
         --skip-deps)
             skip_deps=1
             ;;
         --skip-init)
             skip_init=1
+            explicit_skip_init=1
             ;;
         --force-env)
             force_env=1
@@ -147,13 +157,18 @@ while [ "$#" -gt 0 ]; do
         --dry-run)
             dry_run=1
             ;;
+        --yes)
+            yes=1
+            ;;
         --install-schedule)
             install_schedule=1
+            explicit_install_schedule=1
             ;;
         --schedule-time)
             shift
             [ "$#" -gt 0 ] || die "--schedule-time requires HH:MM."
             schedule_time=$1
+            explicit_schedule_time=1
             ;;
         -h|--help)
             usage
@@ -591,9 +606,138 @@ read_yes_no_default() {
                 ;;
             *)
                 warn "Please answer y or n."
+            ;;
+        esac
+    done
+}
+
+is_interactive() {
+    [ "$dry_run" -eq 0 ] && [ "$yes" -eq 0 ] && [ -t 0 ] && [ -t 1 ]
+}
+
+require_interactive() {
+    if ! is_interactive; then
+        die "Non-interactive install requires --yes, --skip-init, or explicit parameters."
+    fi
+}
+
+read_menu_choice() {
+    prompt=$1
+    default=$2
+    choices=$3
+
+    while :; do
+        value=$(read_with_default "$prompt" "$default")
+        case " $choices " in
+            *" $value "*)
+                printf '%s' "$value"
+                return
+                ;;
+            *)
+                warn "Please choose one of: $choices."
                 ;;
         esac
     done
+}
+
+write_install_plan_summary() {
+    env_file=$1
+
+    step "Installation plan"
+    printf '  CLI install source: %s\n' "$install_mode"
+    if [ "$install_mode" = release ]; then
+        printf '  Release version: %s\n' "$release_version"
+        printf '  Managed bin dir: %s\n' "$(managed_bin_dir)"
+    else
+        printf '  Source checkout: %s\n' "$repo_root"
+        printf '  Cargo bin dir: %s\n' "$HOME/.cargo/bin"
+    fi
+    printf '  Environment file: %s\n' "$env_file"
+    if [ "$skip_init" -eq 1 ]; then
+        printf '  Initialize repository now: false\n'
+    else
+        printf '  Initialize repository now: true\n'
+    fi
+    if [ "$install_schedule" -eq 1 ]; then
+        printf '  Install daily backup schedule: true\n'
+        printf '  Schedule time: %s\n' "$schedule_time"
+    else
+        printf '  Install daily backup schedule: false\n'
+    fi
+}
+
+resolve_interactive_install_plan() {
+    env_file=$1
+
+    step "codex-backup interactive installer"
+    printf '%s\n' "This wizard installs codex-backup, prepares Restic, and can initialize your repository."
+    printf '%s\n' "Defaults: latest GitHub Release, default local Restic repository, no daily schedule."
+
+    if [ "$dry_run" -eq 1 ] || [ "$yes" -eq 1 ]; then
+        step "Using default non-interactive install plan where options were not provided"
+        write_install_plan_summary "$env_file"
+        return
+    fi
+
+    require_interactive
+
+    if [ "$explicit_install_mode" -eq 0 ]; then
+        step "Select codex-backup CLI install source"
+        printf '  1) Latest GitHub Release\n'
+        printf '  2) Specific GitHub Release\n'
+        printf '  3) Build from source\n'
+        choice=$(read_menu_choice "Choose install source" 1 "1 2 3")
+        case "$choice" in
+            1)
+                install_mode=release
+                if [ "$explicit_release_version" -eq 0 ]; then
+                    release_version=latest
+                fi
+                ;;
+            2)
+                install_mode=release
+                if [ "$explicit_release_version" -eq 0 ]; then
+                    release_version=$(read_required "GitHub release tag (for example v0.1.0)")
+                fi
+                ;;
+            3)
+                install_mode=source
+                ;;
+        esac
+    fi
+
+    if [ "$explicit_skip_init" -eq 0 ]; then
+        if read_yes_no_default "Initialize the Restic repository now" 1; then
+            skip_init=0
+        else
+            skip_init=1
+        fi
+    fi
+
+    if [ "$explicit_install_schedule" -eq 0 ]; then
+        if read_yes_no_default "Install daily backup schedule" 0; then
+            install_schedule=1
+        else
+            install_schedule=0
+        fi
+    fi
+
+    if [ "$install_schedule" -eq 1 ] && [ "$explicit_schedule_time" -eq 0 ]; then
+        while :; do
+            schedule_time=$(read_with_default "Daily backup time (HH:MM)" "$schedule_time")
+            case "$schedule_time" in
+                [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9])
+                    break
+                    ;;
+                *)
+                    warn "Schedule time must use HH:MM with a valid 24-hour time."
+                    ;;
+            esac
+        done
+    fi
+
+    write_install_plan_summary "$env_file"
+    read_yes_no_default "Proceed with this installation" 1 || die "Installation cancelled."
 }
 
 append_env_line() {
@@ -617,11 +761,18 @@ write_env_file() {
     fi
 
     if [ "$dry_run" -eq 1 ]; then
-        step "Would prompt for local or remote Restic settings and write $env_file"
+        step "Would prompt with Select Restic repository menu and write $env_file"
+        printf '[dry-run] Select Restic repository\n'
+        printf '[dry-run] 1) Default local repository\n'
+        printf '[dry-run] 2) Custom local repository path\n'
+        printf '[dry-run] 3) S3/R2 repository URL\n'
+        printf '[dry-run] 4) Legacy Cloudflare R2 fields\n'
         return
     fi
 
-    [ -t 0 ] || die "Cannot prompt for .env values because stdin is not interactive. Re-run with --skip-init or create $env_file manually."
+    if [ "$yes" -eq 0 ]; then
+        require_interactive
+    fi
 
     env_dir=$(dirname "$env_file")
     mkdir -p "$env_dir"
@@ -633,30 +784,45 @@ write_env_file() {
 
     step "Creating .env at $env_file"
     printf '# Generated by scripts/install.sh.\n' >> "$env_tmp"
-    if read_yes_no_default "Use default local Restic repository" 1; then
+    if [ "$yes" -eq 1 ]; then
         printf '# Default local Restic repository will be used because RESTIC_REPOSITORY is not set.\n' >> "$env_tmp"
     else
-        printf 'RESTIC_REPOSITORY (enter a local path or s3: URL; leave blank to build it from R2 fields): ' >&2
-        IFS= read -r repository
+        step "Select Restic repository"
+        printf '  1) Default local repository\n'
+        printf '  2) Custom local repository path\n'
+        printf '  3) S3/R2 repository URL\n'
+        printf '  4) Legacy Cloudflare R2 fields\n'
+        printf '%s\n' "Use default local Restic repository by choosing 1."
+        repository_choice=$(read_menu_choice "Choose repository type" 1 "1 2 3 4")
 
-        if [ -n "$repository" ]; then
-            append_env_line RESTIC_REPOSITORY "$repository"
-            case "$repository" in
-                s3:*)
-                    append_env_line R2_ACCESS_KEY_ID "$(read_required R2_ACCESS_KEY_ID)"
-                    append_env_line R2_SECRET_ACCESS_KEY "$(read_required R2_SECRET_ACCESS_KEY 1)"
-                    append_env_line R2_REGION "$(read_with_default R2_REGION auto)"
-                    ;;
-            esac
-        else
-            append_env_line R2_ACCOUNT_ID "$(read_required R2_ACCOUNT_ID)"
-            append_env_line R2_BUCKET "$(read_required R2_BUCKET)"
-            append_env_line R2_PREFIX "$(read_with_default R2_PREFIX codex/history)"
-            printf '\n' >> "$env_tmp"
-            append_env_line R2_ACCESS_KEY_ID "$(read_required R2_ACCESS_KEY_ID)"
-            append_env_line R2_SECRET_ACCESS_KEY "$(read_required R2_SECRET_ACCESS_KEY 1)"
-            append_env_line R2_REGION "$(read_with_default R2_REGION auto)"
-        fi
+        case "$repository_choice" in
+            1)
+                printf '# Default local Restic repository will be used because RESTIC_REPOSITORY is not set.\n' >> "$env_tmp"
+                ;;
+            2)
+                append_env_line RESTIC_REPOSITORY "$(read_required "Custom local RESTIC_REPOSITORY path")"
+                ;;
+            3)
+                repository=$(read_required "S3/R2 RESTIC_REPOSITORY URL (must start with s3:)")
+                case "$repository" in
+                    s3:*) ;;
+                    *) die "S3/R2 RESTIC_REPOSITORY must start with s3:." ;;
+                esac
+                append_env_line RESTIC_REPOSITORY "$repository"
+                append_env_line R2_ACCESS_KEY_ID "$(read_required R2_ACCESS_KEY_ID)"
+                append_env_line R2_SECRET_ACCESS_KEY "$(read_required R2_SECRET_ACCESS_KEY 1)"
+                append_env_line R2_REGION "$(read_with_default R2_REGION auto)"
+                ;;
+            4)
+                append_env_line R2_ACCOUNT_ID "$(read_required R2_ACCOUNT_ID)"
+                append_env_line R2_BUCKET "$(read_required R2_BUCKET)"
+                append_env_line R2_PREFIX "$(read_with_default R2_PREFIX codex/history)"
+                printf '\n' >> "$env_tmp"
+                append_env_line R2_ACCESS_KEY_ID "$(read_required R2_ACCESS_KEY_ID)"
+                append_env_line R2_SECRET_ACCESS_KEY "$(read_required R2_SECRET_ACCESS_KEY 1)"
+                append_env_line R2_REGION "$(read_with_default R2_REGION auto)"
+                ;;
+        esac
     fi
 
     mv "$env_tmp" "$env_file"
@@ -702,6 +868,9 @@ install_schedule_if_requested() {
 
 add_cargo_path
 add_managed_bin_path
+env_path=$(default_env_path)
+
+resolve_interactive_install_plan "$env_path"
 
 if [ "$skip_deps" -eq 1 ]; then
     step "Skipping dependency installation"
@@ -715,7 +884,6 @@ else
 fi
 
 install_cli
-env_path=$(default_env_path)
 initialize_repository "$env_path"
 run_doctor "$env_path"
 install_schedule_if_requested "$env_path"

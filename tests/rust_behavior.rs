@@ -355,6 +355,7 @@ fn install_scripts_expose_planned_interfaces() {
         "SkipInit",
         "ForceEnv",
         "DryRun",
+        "Yes",
         "InstallSchedule",
         "ScheduleTime",
         "InstallMode",
@@ -368,6 +369,7 @@ fn install_scripts_expose_planned_interfaces() {
         "--skip-init",
         "--force-env",
         "--dry-run",
+        "--yes",
         "--install-schedule",
         "--schedule-time",
         "--install-mode",
@@ -385,6 +387,18 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(windows.contains("codex-backup\\bin"));
     assert!(windows.contains("Expand-Archive"));
     assert!(windows.contains("Get-FileHash"));
+    assert!(windows.contains("codex-backup interactive installer"));
+    assert!(windows.contains("1) Latest GitHub Release"));
+    assert!(windows.contains("2) Specific GitHub Release"));
+    assert!(windows.contains("3) Build from source"));
+    assert!(windows.contains("Select Restic repository"));
+    assert!(windows.contains("1) Default local repository"));
+    assert!(windows.contains("2) Custom local repository path"));
+    assert!(windows.contains("3) S3/R2 repository URL"));
+    assert!(windows.contains("4) Legacy Cloudflare R2 fields"));
+    assert!(windows.contains("Install daily backup schedule"));
+    assert!(windows.contains("Non-interactive install requires -Yes"));
+    assert!(windows.contains("Using default non-interactive install plan"));
     assert!(windows.contains("Use default local Restic repository"));
     assert!(windows.contains("Default local Restic repository"));
     assert!(windows.contains("StartsWith(\"s3:\""));
@@ -399,6 +413,18 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(unix.contains("macos-aarch64"));
     assert!(unix.contains("BEGIN codex-backup PATH"));
     assert!(unix.contains("sha256sum -c"));
+    assert!(unix.contains("codex-backup interactive installer"));
+    assert!(unix.contains("1) Latest GitHub Release"));
+    assert!(unix.contains("2) Specific GitHub Release"));
+    assert!(unix.contains("3) Build from source"));
+    assert!(unix.contains("Select Restic repository"));
+    assert!(unix.contains("1) Default local repository"));
+    assert!(unix.contains("2) Custom local repository path"));
+    assert!(unix.contains("3) S3/R2 repository URL"));
+    assert!(unix.contains("4) Legacy Cloudflare R2 fields"));
+    assert!(unix.contains("Install daily backup schedule"));
+    assert!(unix.contains("Non-interactive install requires --yes"));
+    assert!(unix.contains("Using default non-interactive install plan"));
     assert!(unix.contains("Use default local Restic repository"));
     assert!(unix.contains("Default local Restic repository"));
     assert!(unix.contains("s3:*"));
