@@ -1,9 +1,10 @@
-# Codex R2 Backup
+# Codex Backup
 
 [中文说明](README.zh-CN.md)
 
 Cross-platform Rust CLI for backing up local Codex history, memories, and SQLite
-state to Cloudflare R2 through Restic.
+state to a local Restic repository by default. Remote Restic repositories such
+as Cloudflare R2/S3 remain supported through optional configuration.
 
 ## What Gets Backed Up
 
@@ -45,10 +46,10 @@ chmod +x scripts/install.sh
 
 The installer checks or installs Restic, downloads the latest matching
 `codex-backup` GitHub Release by default, and adds the managed install directory
-to PATH. It then prompts for R2 or `RESTIC_REPOSITORY` settings, writes the
-private `.env` file to the platform app data directory, saves the Restic
-repository password to the system keyring, and initializes the Restic repository.
-Rust is not required for the default release-based install.
+to PATH. It defaults to a local Restic repository in the platform app data
+directory, then saves the Restic repository password to the system keyring and
+initializes the repository. You can opt into a custom local path or R2/S3 during
+setup. Rust is not required for the default release-based install.
 
 Existing `.env` files are preserved by default. Pass `-ForceEnv` on Windows or
 `--force-env` on macOS/Linux to replace them. Pass `-SkipInit` or `--skip-init`
@@ -82,9 +83,40 @@ then install the CLI from the current checkout and initialize it:
 
 ```powershell
 cargo install --path . --locked --force --bin codex-backup
-Copy-Item .env.example .env
-codex-backup doctor --env-file .env
-codex-backup init --set-password --env-file .env
+codex-backup doctor
+codex-backup init --set-password
+```
+
+## Repository Configuration
+
+Without a `.env` file, `codex-backup` uses a default local Restic repository
+under the platform app data directory. This is the recommended setup for
+syncing history across Codex account switches on the same machine.
+
+To use a specific local repository, create `.env` with:
+
+```dotenv
+RESTIC_REPOSITORY=C:\path\to\codex-restic-repository
+```
+
+To use Cloudflare R2 or another S3-compatible repository, set:
+
+```dotenv
+RESTIC_REPOSITORY=s3:https://your-account-id.r2.cloudflarestorage.com/your-r2-bucket-name/codex/history
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+R2_REGION=auto
+```
+
+Legacy R2 fields are still supported and can build the `s3:` repository URL:
+
+```dotenv
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_BUCKET=your-r2-bucket-name
+R2_PREFIX=codex/history
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+R2_REGION=auto
 ```
 
 Check local readiness:
@@ -105,7 +137,7 @@ Run a normal backup:
 codex-backup backup
 ```
 
-Run a local staging dry run without Restic upload:
+Run a local staging dry run without writing to the Restic repository:
 
 ```powershell
 codex-backup backup --skip-restic --keep-staging
@@ -118,7 +150,7 @@ codex-backup backup --skip-restic --keep-staging --codex-dir C:\path\to\.codex
 ```
 
 Restic snapshots are tagged with `codex` and the current platform tag:
-`windows`, `macos`, or `linux`. Retention is applied after successful upload:
+`windows`, `macos`, or `linux`. Retention is applied after a successful write:
 
 - keep 7 daily snapshots
 - keep 4 weekly snapshots
@@ -175,6 +207,13 @@ codex-backup restore --apply
 Applying a restore moves existing managed files to the platform app data
 rollback directory before copying restored files into place. Credentials are
 never restored.
+
+## Security Boundary
+
+This tool backs up Codex history context and local state only. It does not back
+up login credentials, sandbox secrets, caches, or worktrees. The Restic
+repository password is independent from any R2/S3 credentials; losing it means
+existing encrypted snapshots cannot be restored.
 
 ## Releases
 

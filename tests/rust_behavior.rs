@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use codex_backup::{
-    config::BackupConfig,
+    config::{BackupConfig, RepositorySource},
     paths::{excluded_relative_paths, managed_relative_paths},
     restic::{backup_commands, check_commands, restore_command},
     restore::{apply_restore, ApplyRestoreOptions},
@@ -55,6 +55,75 @@ fn explicit_restic_repository_overrides_r2_parts() {
         config.restic_repository().unwrap(),
         "s3:https://example.test/bucket/custom"
     );
+}
+
+#[test]
+fn missing_env_defaults_to_local_repository_without_r2_credentials() {
+    let tmp = tempdir().unwrap();
+    let missing_env = tmp.path().join(".env");
+    let default_repository = tmp.path().join("repository");
+
+    let config = BackupConfig::from_optional_file(&missing_env).unwrap();
+
+    assert_eq!(config.repository_source(), RepositorySource::DefaultLocal);
+    assert_eq!(
+        config
+            .restic_repository_with_default(&default_repository)
+            .unwrap(),
+        default_repository.display().to_string()
+    );
+
+    let envs = config
+        .restic_env_with_default("secret".to_string(), &default_repository)
+        .unwrap();
+    assert!(envs.iter().any(|(name, value)| {
+        name == "RESTIC_REPOSITORY" && value == &default_repository.display().to_string()
+    }));
+    assert!(envs
+        .iter()
+        .any(|(name, value)| name == "RESTIC_PASSWORD" && value == "secret"));
+    assert!(!envs.iter().any(|(name, _)| name == "AWS_ACCESS_KEY_ID"));
+    assert!(!envs.iter().any(|(name, _)| name == "AWS_SECRET_ACCESS_KEY"));
+}
+
+#[test]
+fn explicit_local_repository_does_not_require_r2_credentials() {
+    let default_repository = Path::new("/ignored/default");
+    let config = BackupConfig::from_pairs([("RESTIC_REPOSITORY", "/tmp/codex-local-repo")]);
+
+    assert_eq!(
+        config.repository_source(),
+        RepositorySource::ExplicitRepository
+    );
+    assert_eq!(
+        config
+            .restic_repository_with_default(default_repository)
+            .unwrap(),
+        "/tmp/codex-local-repo"
+    );
+
+    let envs = config
+        .restic_env_with_default("secret".to_string(), default_repository)
+        .unwrap();
+    assert!(envs
+        .iter()
+        .any(|(name, value)| name == "RESTIC_REPOSITORY" && value == "/tmp/codex-local-repo"));
+    assert!(!envs.iter().any(|(name, _)| name == "AWS_ACCESS_KEY_ID"));
+}
+
+#[test]
+fn explicit_s3_repository_requires_r2_credentials() {
+    let default_repository = Path::new("/ignored/default");
+    let config =
+        BackupConfig::from_pairs([("RESTIC_REPOSITORY", "s3:https://example.test/bucket")]);
+
+    let error = config
+        .restic_env_with_default("secret".to_string(), default_repository)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("R2_ACCESS_KEY_ID"));
+    assert!(error.contains("R2_SECRET_ACCESS_KEY"));
 }
 
 #[test]
@@ -249,7 +318,7 @@ fn scheduler_generators_cover_windows_launchd_and_systemd() {
     let exe = Path::new("/opt/codex-backup");
     let env = Path::new("/home/alice/.config/codex-backup/.env");
 
-    let windows = windows_install_command("Codex R2 History Backup", "03:00", exe, env);
+    let windows = windows_install_command("Codex History Backup", "03:00", exe, env);
     assert_eq!(windows.program, "schtasks.exe");
     assert!(windows.args.contains(&"/SC".to_string()));
     assert!(windows.args.contains(&"DAILY".to_string()));
@@ -266,6 +335,10 @@ fn scheduler_generators_cover_windows_launchd_and_systemd() {
     assert!(systemd
         .service
         .contains("ExecStart=/opt/codex-backup backup --env-file"));
+    assert!(systemd
+        .service
+        .contains("Back up Codex history and SQLite snapshots with Restic"));
+    assert!(!systemd.service.contains("Cloudflare R2"));
     assert!(systemd.timer.contains("OnCalendar=*-*-* 03:00:00"));
     assert!(systemd.timer.contains("Persistent=true"));
 }
@@ -312,6 +385,9 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(windows.contains("codex-backup\\bin"));
     assert!(windows.contains("Expand-Archive"));
     assert!(windows.contains("Get-FileHash"));
+    assert!(windows.contains("Use default local Restic repository"));
+    assert!(windows.contains("Default local Restic repository"));
+    assert!(windows.contains("StartsWith(\"s3:\""));
 
     assert!(unix.contains("install_mode=release"));
     assert!(unix.contains("AirSodaz/codex_backup"));
@@ -323,6 +399,9 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(unix.contains("macos-aarch64"));
     assert!(unix.contains("BEGIN codex-backup PATH"));
     assert!(unix.contains("sha256sum -c"));
+    assert!(unix.contains("Use default local Restic repository"));
+    assert!(unix.contains("Default local Restic repository"));
+    assert!(unix.contains("s3:*"));
 
     assert!(windows.contains("Rustlang.Rustup"));
     assert!(windows.contains("restic.restic"));

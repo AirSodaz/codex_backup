@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use chrono::Local;
 use clap::{Args, Parser, Subcommand};
 
-use crate::config::BackupConfig;
+use crate::config::{BackupConfig, RepositorySource};
 use crate::password::{get_restic_password, keyring_available, save_restic_password};
 use crate::paths;
 use crate::restic::{
@@ -18,7 +18,9 @@ use crate::staging::{create_staging, StagingOptions};
 
 #[derive(Debug, Parser)]
 #[command(name = "codex-backup")]
-#[command(about = "Cross-platform Codex history backup tooling for Restic and Cloudflare R2")]
+#[command(
+    about = "Cross-platform Codex history backup tooling for local or remote Restic repositories"
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -136,8 +138,8 @@ fn init(args: InitArgs) -> Result<()> {
         println!("Saved Restic password to the system keyring.");
     }
 
-    let env_file = resolve_env_file(&args.common)?;
-    let config = BackupConfig::from_file(&env_file)?;
+    let config = load_config(&args.common)?;
+    prepare_default_repository_parent(&config)?;
     let envs = config.restic_env(get_restic_password(args.common.password_file.as_deref())?)?;
     println!("Restic repository: {}", config.restic_repository()?);
 
@@ -168,8 +170,8 @@ fn backup(args: BackupArgs) -> Result<()> {
         return Ok(());
     }
 
-    let env_file = resolve_env_file(&args.common)?;
-    let config = BackupConfig::from_file(&env_file)?;
+    let config = load_config(&args.common)?;
+    prepare_default_repository_parent(&config)?;
     let envs = config.restic_env(get_restic_password(args.common.password_file.as_deref())?)?;
 
     for command in backup_commands(&staging.staging_dir, paths::platform_tag()) {
@@ -197,8 +199,8 @@ fn restore(args: RestoreArgs) -> Result<()> {
     fs::create_dir_all(&restore_run_root)
         .with_context(|| format!("failed to create {}", restore_run_root.display()))?;
 
-    let env_file = resolve_env_file(&args.common)?;
-    let config = BackupConfig::from_file(&env_file)?;
+    let config = load_config(&args.common)?;
+    prepare_default_repository_parent(&config)?;
     let envs = config.restic_env(get_restic_password(args.common.password_file.as_deref())?)?;
     let command = restore_command(&args.snapshot, &restore_run_root);
     println!("Running: {} {}", command.program, command.args.join(" "));
@@ -231,8 +233,8 @@ fn restore(args: RestoreArgs) -> Result<()> {
 }
 
 fn check(args: CheckArgs) -> Result<()> {
-    let env_file = resolve_env_file(&args.common)?;
-    let config = BackupConfig::from_file(&env_file)?;
+    let config = load_config(&args.common)?;
+    prepare_default_repository_parent(&config)?;
     let envs = config.restic_env(get_restic_password(args.common.password_file.as_deref())?)?;
 
     for command in check_commands(args.skip_prune) {
@@ -248,6 +250,7 @@ fn check(args: CheckArgs) -> Result<()> {
 fn doctor(args: CommonArgs) -> Result<()> {
     let env_file = resolve_env_file(&args)?;
     let codex_dir = resolve_codex_dir(&args)?;
+    let config = BackupConfig::from_optional_file(&env_file)?;
 
     println!(
         "restic: {}",
@@ -262,9 +265,14 @@ fn doctor(args: CommonArgs) -> Result<()> {
         if env_file.exists() {
             "found"
         } else {
-            "missing"
+            "missing, using default local repository"
         },
         env_file.display()
+    );
+    println!(
+        "repository: {} ({})",
+        config.restic_repository()?,
+        config.repository_source().label()
     );
     println!(
         "Codex dir: {} ({})",
@@ -331,13 +339,30 @@ fn resolve_codex_dir(args: &CommonArgs) -> Result<PathBuf> {
     }
 }
 
+fn load_config(args: &CommonArgs) -> Result<BackupConfig> {
+    BackupConfig::from_optional_file(&resolve_env_file(args)?)
+}
+
+fn prepare_default_repository_parent(config: &BackupConfig) -> Result<()> {
+    if config.repository_source() != RepositorySource::DefaultLocal {
+        return Ok(());
+    }
+
+    let repository = paths::repository_root()?;
+    if let Some(parent) = repository.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    Ok(())
+}
+
 fn timestamp() -> String {
     Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
 fn default_task_name() -> String {
     if cfg!(target_os = "windows") {
-        "Codex R2 History Backup".to_string()
+        "Codex History Backup".to_string()
     } else {
         "codex-backup".to_string()
     }

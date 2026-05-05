@@ -99,7 +99,7 @@ pub fn systemd_unit_files(
 ) -> SystemdUnitFiles {
     let service = format!(
         r#"[Unit]
-Description=Back up Codex history and SQLite snapshots to Cloudflare R2 with Restic
+Description=Back up Codex history and SQLite snapshots with Restic
 
 [Service]
 Type=oneshot

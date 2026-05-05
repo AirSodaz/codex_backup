@@ -60,6 +60,10 @@ pub fn staging_root() -> Result<PathBuf> {
     Ok(app_root()?.join("staging"))
 }
 
+pub fn repository_root() -> Result<PathBuf> {
+    Ok(app_root()?.join("repository"))
+}
+
 pub fn restore_root() -> Result<PathBuf> {
     Ok(app_root()?.join("restore"))
 }
