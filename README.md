@@ -27,6 +27,12 @@ The CLI stages a clean backup directory first. Active SQLite databases are not
 copied directly; each managed root SQLite file is captured with SQLite's online
 backup API.
 
+During staging, symlinks under managed paths are skipped instead of followed.
+Regular files under managed paths larger than 256 MiB are also skipped. Both
+cases are recorded in `manifest.json` under `warnings` so you can inspect what
+was intentionally left out. Root `logs_*.sqlite` and `state_*.sqlite` files are
+still captured through SQLite's online backup path.
+
 ## Setup
 
 Run the installer from the repository root.
@@ -252,6 +258,10 @@ This tool backs up Codex history context and local state only. It does not back
 up login credentials, sandbox secrets, caches, or worktrees. The Restic
 repository password is independent from any R2/S3 credentials; losing it means
 existing encrypted snapshots cannot be restored.
+
+Managed symlinks are never followed, which prevents a backup from accidentally
+capturing files outside `~/.codex`. Oversized managed files are skipped with a
+manifest warning rather than being silently included.
 
 ## Releases
 

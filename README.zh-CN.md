@@ -17,6 +17,8 @@
 
 SQLite 文件不会直接复制。工具会先用 SQLite online backup API 生成一致性快照，再把快照放入临时 staging 目录。
 
+staging 过程中，受管理路径里的符号链接会被跳过，不会被跟随复制。受管理路径里的普通文件如果超过 256 MiB，也会被跳过。这两类情况都会写入 `manifest.json` 的 `warnings`，方便恢复前检查哪些内容被刻意排除。根目录下的 `logs_*.sqlite` 和 `state_*.sqlite` 仍然通过 SQLite online backup 路径采集。
+
 以下内容会被刻意排除：
 
 - `auth.json`
@@ -320,6 +322,8 @@ codex-backup restore --apply
 ## 安全边界
 
 这个工具只备份 Codex 的历史上下文和本地状态，不备份登录凭据、沙箱密钥、缓存或 worktrees。R2/S3 访问密钥只在使用远端仓库时需要，应放在本机 `.env` 或安全的运行环境中，不要提交到 Git。
+
+受管理路径里的符号链接不会被跟随，避免备份意外采集 `~/.codex` 之外的文件。超大的受管理普通文件会带着 manifest warning 被跳过，而不是静默进入备份。
 
 Restic 仓库密码独立于 R2/S3 密钥。丢失 Restic 密码会导致已有备份无法解密，建议使用系统 keyring 或安全的密码管理器保存。
 

@@ -164,6 +164,9 @@ fn backup(args: BackupArgs) -> Result<()> {
         timestamp,
     })?;
     println!("Staging ready: {}", staging.staging_dir.display());
+    for warning in &staging.warnings {
+        eprintln!("Warning: {}: {}", warning.path, warning.reason);
+    }
 
     if args.skip_restic {
         println!("{}", staging.staging_dir.display());

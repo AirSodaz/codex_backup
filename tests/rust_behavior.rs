@@ -7,7 +7,9 @@ use codex_backup::{
     restic::{backup_commands, check_commands, restore_command},
     restore::{apply_restore, ApplyRestoreOptions},
     schedule::{launch_agent_plist, systemd_unit_files, windows_install_command},
-    staging::{create_staging, Manifest, StagingOptions},
+    staging::{
+        create_staging, create_staging_with_policy, Manifest, StagingOptions, StagingPolicy,
+    },
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -17,6 +19,16 @@ fn write_file(path: &Path, contents: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, contents).unwrap();
+}
+
+#[cfg(unix)]
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
 }
 
 #[test]
@@ -210,6 +222,77 @@ fn staging_copies_managed_files_excludes_secrets_and_uses_sqlite_backup() {
         .query_row("SELECT value FROM state", [], |row| row.get(0))
         .unwrap();
     assert_eq!(value, "ok");
+}
+
+#[test]
+fn staging_skips_symlinks_and_large_managed_files_with_manifest_warnings() {
+    let tmp = tempdir().unwrap();
+    let source = tmp.path().join("source");
+    let work_root = tmp.path().join("work");
+
+    write_file(&source.join("sessions/ok.jsonl"), "small");
+    write_file(&tmp.path().join("outside-secret.txt"), "do not follow");
+    let symlink_created = create_file_symlink(
+        &tmp.path().join("outside-secret.txt"),
+        &source.join("sessions/link.jsonl"),
+    )
+    .is_ok();
+
+    let large_file = source.join("sessions/large.bin");
+    fs::File::create(&large_file).unwrap().set_len(9).unwrap();
+
+    let result = create_staging_with_policy(
+        StagingOptions {
+            codex_dir: source,
+            work_root,
+            timestamp: "20260504-030405".to_string(),
+        },
+        StagingPolicy { max_file_bytes: 8 },
+    )
+    .unwrap();
+
+    assert!(result.staging_dir.join("sessions/ok.jsonl").exists());
+    assert!(!result.staging_dir.join("sessions/large.bin").exists());
+    if symlink_created {
+        assert!(!result.staging_dir.join("sessions/link.jsonl").exists());
+    }
+
+    let manifest: Manifest =
+        serde_json::from_str(&fs::read_to_string(&result.manifest_path).unwrap()).unwrap();
+    assert!(manifest
+        .warnings
+        .iter()
+        .any(|warning| warning.path == "sessions/large.bin"
+            && warning.reason.contains("larger than")));
+    if symlink_created {
+        assert!(manifest
+            .warnings
+            .iter()
+            .any(|warning| warning.path == "sessions/link.jsonl"
+                && warning.reason.contains("symlink")));
+    }
+    assert_eq!(result.warnings, manifest.warnings);
+}
+
+#[test]
+fn legacy_manifest_without_warnings_still_deserializes() {
+    let manifest: Manifest = serde_json::from_str(
+        r#"{
+  "schemaVersion": 1,
+  "backupName": "codex-history",
+  "createdAt": "2026-05-04T00:00:00Z",
+  "host": "test-host",
+  "user": "test-user",
+  "codexDir": "/tmp/.codex",
+  "includedPaths": ["sessions"],
+  "excludedPaths": ["auth.json"],
+  "sqliteBackups": [],
+  "restoreNotes": []
+}"#,
+    )
+    .unwrap();
+
+    assert!(manifest.warnings.is_empty());
 }
 
 #[test]

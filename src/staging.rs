@@ -9,11 +9,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::{excluded_relative_paths, managed_relative_paths};
 
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct StagingOptions {
     pub codex_dir: PathBuf,
     pub work_root: PathBuf,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StagingPolicy {
+    pub max_file_bytes: u64,
+}
+
+impl Default for StagingPolicy {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +37,7 @@ pub struct StagingResult {
     pub manifest_path: PathBuf,
     pub included_paths: Vec<String>,
     pub sqlite_backups: Vec<SqliteBackup>,
+    pub warnings: Vec<ManifestWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,6 +54,8 @@ pub struct Manifest {
     pub excluded_paths: Vec<String>,
     pub sqlite_backups: Vec<SqliteBackup>,
     pub restore_notes: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<ManifestWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,6 +65,13 @@ pub struct SqliteBackup {
     pub backup_file: String,
     pub source_last_write_time: String,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestWarning {
+    pub path: String,
+    pub reason: String,
 }
 
 impl Manifest {
@@ -73,11 +98,19 @@ impl Manifest {
                 })
                 .collect(),
             restore_notes: restore_notes(),
+            warnings: Vec::new(),
         }
     }
 }
 
 pub fn create_staging(options: StagingOptions) -> Result<StagingResult> {
+    create_staging_with_policy(options, StagingPolicy::default())
+}
+
+pub fn create_staging_with_policy(
+    options: StagingOptions,
+    policy: StagingPolicy,
+) -> Result<StagingResult> {
     if !options.codex_dir.exists() {
         bail!("Codex directory not found: {}", options.codex_dir.display());
     }
@@ -102,14 +135,19 @@ pub fn create_staging(options: StagingOptions) -> Result<StagingResult> {
         .with_context(|| format!("failed to create staging dir {}", staging_dir.display()))?;
 
     let mut included_paths = Vec::new();
+    let mut warnings = Vec::new();
     for relative_path in managed_relative_paths() {
         let source = options.codex_dir.join(relative_path);
-        if !source.exists() {
-            continue;
-        }
         let destination = staging_dir.join(relative_path);
-        copy_path(&source, &destination)?;
-        included_paths.push(relative_path.to_string());
+        if stage_managed_path(
+            &source,
+            &destination,
+            Path::new(relative_path),
+            policy,
+            &mut warnings,
+        )? {
+            included_paths.push(relative_path.to_string());
+        }
     }
 
     let sqlite_backups = backup_root_sqlite_files(&options.codex_dir, &staging_dir)?;
@@ -132,6 +170,7 @@ pub fn create_staging(options: StagingOptions) -> Result<StagingResult> {
             .collect(),
         sqlite_backups: sqlite_backups.clone(),
         restore_notes: restore_notes(),
+        warnings: warnings.clone(),
     };
 
     let manifest_path = staging_dir.join("manifest.json");
@@ -143,7 +182,88 @@ pub fn create_staging(options: StagingOptions) -> Result<StagingResult> {
         manifest_path,
         included_paths,
         sqlite_backups,
+        warnings,
     })
+}
+
+fn stage_managed_path(
+    source: &Path,
+    destination: &Path,
+    relative_path: &Path,
+    policy: StagingPolicy,
+    warnings: &mut Vec<ManifestWarning>,
+) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", source.display()));
+        }
+    };
+    let file_type = metadata.file_type();
+
+    if file_type.is_symlink() {
+        warnings.push(ManifestWarning {
+            path: manifest_path(relative_path),
+            reason: "Skipped symlink to avoid following paths outside the Codex directory."
+                .to_string(),
+        });
+        return Ok(false);
+    }
+
+    if file_type.is_dir() {
+        fs::create_dir_all(destination)
+            .with_context(|| format!("failed to create {}", destination.display()))?;
+        for entry in fs::read_dir(source)
+            .with_context(|| format!("failed to read directory {}", source.display()))?
+        {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let child_relative = relative_path.join(&file_name);
+            let child_destination = destination.join(&file_name);
+            stage_managed_path(
+                &entry.path(),
+                &child_destination,
+                &child_relative,
+                policy,
+                warnings,
+            )?;
+        }
+        return Ok(true);
+    }
+
+    if file_type.is_file() {
+        if metadata.len() > policy.max_file_bytes {
+            warnings.push(ManifestWarning {
+                path: manifest_path(relative_path),
+                reason: format!(
+                    "Skipped file larger than {} bytes ({} bytes).",
+                    policy.max_file_bytes,
+                    metadata.len()
+                ),
+            });
+            return Ok(false);
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::copy(source, destination).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+        return Ok(true);
+    }
+
+    warnings.push(ManifestWarning {
+        path: manifest_path(relative_path),
+        reason: "Skipped unsupported file type.".to_string(),
+    });
+    Ok(false)
 }
 
 pub fn copy_path(source: &Path, destination: &Path) -> Result<()> {
@@ -171,6 +291,10 @@ pub fn copy_path(source: &Path, destination: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn manifest_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn backup_root_sqlite_files(codex_dir: &Path, staging_dir: &Path) -> Result<Vec<SqliteBackup>> {
