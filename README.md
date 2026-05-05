@@ -72,8 +72,8 @@ combine the safe defaults with `-Yes` / `--yes` and usually `-SkipInit` /
 ./scripts/install.sh --yes --skip-init
 ```
 
-To pin a release, pass `-ReleaseVersion v0.1.0` on Windows or
-`--release-version v0.1.0` on macOS/Linux.
+To pin a release, pass `-ReleaseVersion v0.1.1` on Windows or
+`--release-version v0.1.1` on macOS/Linux.
 
 To update an existing install without touching repository configuration,
 initialization, dependencies, or schedules, use update mode. It always
@@ -82,12 +82,12 @@ environment file:
 
 ```powershell
 .\scripts\install.ps1 -Update
-.\scripts\install.ps1 -Update -ReleaseVersion v0.1.0
+.\scripts\install.ps1 -Update -ReleaseVersion v0.1.1
 ```
 
 ```sh
 ./scripts/install.sh --update
-./scripts/install.sh --update --release-version v0.1.0
+./scripts/install.sh --update --release-version v0.1.1
 ```
 
 To build the CLI locally from source instead of downloading a release, opt in to
@@ -269,7 +269,7 @@ GitHub Actions builds the CLI on every push for Windows x64, Windows ARM64,
 Linux x64, Linux ARM64, macOS Intel, and macOS Apple Silicon. Normal branch
 pushes publish build artifacts on the workflow run only.
 
-Push a version tag such as `v0.1.0` to create or update a GitHub Release
+Push a version tag such as `v0.1.1` to create or update a GitHub Release
 automatically. Release assets are named
 `codex-backup-<version>-<platform>.zip` on Windows and
 `codex-backup-<version>-<platform>.tar.gz` on Linux and macOS. Each release also
