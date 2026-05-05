@@ -69,6 +69,20 @@ Restic 密码提示留到之后处理：
 如需固定版本，Windows 传 `-ReleaseVersion v0.1.0`，macOS/Linux 传
 `--release-version v0.1.0`。
 
+如果只是更新已有安装，不希望改 `.env`、重新初始化仓库、安装依赖或调整计划任务，
+使用更新模式。它会始终重新安装指定的 CLI 目标，然后用默认环境文件运行
+`doctor`：
+
+```powershell
+.\scripts\install.ps1 -Update
+.\scripts\install.ps1 -Update -ReleaseVersion v0.1.0
+```
+
+```sh
+./scripts/install.sh --update
+./scripts/install.sh --update --release-version v0.1.0
+```
+
 如果希望从当前源码构建 CLI，而不是下载 release，可以显式启用 source 模式。
 这个路径会检查或安装 Rust，并执行 `cargo install`：
 
@@ -78,6 +92,17 @@ Restic 密码提示留到之后处理：
 
 ```sh
 ./scripts/install.sh --install-mode source
+```
+
+如果要从当前 checkout 更新已有 CLI，可以把更新模式和 source 模式组合使用。
+这个路径要求 Rust 已经安装：
+
+```powershell
+.\scripts\install.ps1 -Update -InstallMode Source
+```
+
+```sh
+./scripts/install.sh --update --install-mode source
 ```
 
 如需安装每天 03:00 自动备份计划，需要显式开启：

@@ -69,6 +69,21 @@ combine the safe defaults with `-Yes` / `--yes` and usually `-SkipInit` /
 To pin a release, pass `-ReleaseVersion v0.1.0` on Windows or
 `--release-version v0.1.0` on macOS/Linux.
 
+To update an existing install without touching repository configuration,
+initialization, dependencies, or schedules, use update mode. It always
+reinstalls the requested CLI target and then runs `doctor` with the default
+environment file:
+
+```powershell
+.\scripts\install.ps1 -Update
+.\scripts\install.ps1 -Update -ReleaseVersion v0.1.0
+```
+
+```sh
+./scripts/install.sh --update
+./scripts/install.sh --update --release-version v0.1.0
+```
+
 To build the CLI locally from source instead of downloading a release, opt in to
 source mode. This path installs or checks Rust and then runs `cargo install`:
 
@@ -78,6 +93,17 @@ source mode. This path installs or checks Rust and then runs `cargo install`:
 
 ```sh
 ./scripts/install.sh --install-mode source
+```
+
+To update from the current checkout instead, combine update mode with source
+mode. This requires Rust to already be installed:
+
+```powershell
+.\scripts\install.ps1 -Update -InstallMode Source
+```
+
+```sh
+./scripts/install.sh --update --install-mode source
 ```
 
 To install the daily backup schedule during setup, opt in explicitly:

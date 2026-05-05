@@ -360,6 +360,7 @@ fn install_scripts_expose_planned_interfaces() {
         "ScheduleTime",
         "InstallMode",
         "ReleaseVersion",
+        "Update",
     ] {
         assert!(windows.contains(flag), "install.ps1 missing {flag}");
     }
@@ -374,6 +375,7 @@ fn install_scripts_expose_planned_interfaces() {
         "--schedule-time",
         "--install-mode",
         "--release-version",
+        "--update",
     ] {
         assert!(unix.contains(flag), "install.sh missing {flag}");
     }
@@ -402,6 +404,10 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(windows.contains("Use default local Restic repository"));
     assert!(windows.contains("Default local Restic repository"));
     assert!(windows.contains("StartsWith(\"s3:\""));
+    assert!(windows.contains("Update mode only refreshes the codex-backup CLI"));
+    assert!(windows.contains("Update mode cannot be combined with -ForceEnv"));
+    assert!(windows.contains("Update mode cannot be combined with -InstallSchedule"));
+    assert!(windows.contains("codex-backup update script finished"));
 
     assert!(unix.contains("install_mode=release"));
     assert!(unix.contains("AirSodaz/codex_backup"));
@@ -428,6 +434,10 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(unix.contains("Use default local Restic repository"));
     assert!(unix.contains("Default local Restic repository"));
     assert!(unix.contains("s3:*"));
+    assert!(unix.contains("Update mode only refreshes the codex-backup CLI"));
+    assert!(unix.contains("Update mode cannot be combined with --force-env"));
+    assert!(unix.contains("Update mode cannot be combined with --install-schedule"));
+    assert!(unix.contains("codex-backup update script finished"));
 
     assert!(windows.contains("Rustlang.Rustup"));
     assert!(windows.contains("restic.restic"));

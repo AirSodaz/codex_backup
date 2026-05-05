@@ -3,6 +3,7 @@ set -eu
 
 install_mode=release
 release_version=latest
+update=0
 skip_deps=0
 skip_init=0
 force_env=0
@@ -27,6 +28,7 @@ Usage: scripts/install.sh [options]
 Options:
   --install-mode MODE  Install the CLI from release or source. Defaults to release.
   --release-version V  GitHub release tag to install, or latest. Defaults to latest.
+  --update             Refresh only the codex-backup CLI and run doctor.
   --skip-deps          Do not install Rust or Restic.
   --skip-init          Do not prompt for .env values or initialize Restic.
   --force-env          Overwrite an existing generated .env file.
@@ -144,6 +146,9 @@ while [ "$#" -gt 0 ]; do
             release_version=$1
             explicit_release_version=1
             ;;
+        --update)
+            update=1
+            ;;
         --skip-deps)
             skip_deps=1
             ;;
@@ -183,6 +188,17 @@ done
 
 validate_install_mode
 validate_time "$schedule_time"
+
+validate_update_mode_options() {
+    [ "$update" -eq 1 ] || return 0
+
+    [ "$force_env" -eq 0 ] ||
+        die "Update mode cannot be combined with --force-env because update mode does not rewrite .env."
+    [ "$install_schedule" -eq 0 ] ||
+        die "Update mode cannot be combined with --install-schedule because update mode does not change schedules."
+    [ "$explicit_schedule_time" -eq 0 ] ||
+        die "Update mode cannot be combined with --schedule-time because update mode does not change schedules."
+}
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
@@ -508,14 +524,18 @@ install_cli_from_source() {
 }
 
 install_cli() {
+    install_cli_binary
+
+    step "Verifying codex-backup CLI startup"
+    run_cmd codex-backup doctor
+}
+
+install_cli_binary() {
     if [ "$install_mode" = source ]; then
         install_cli_from_source
     else
         install_cli_from_release
     fi
-
-    step "Verifying codex-backup CLI startup"
-    run_cmd codex-backup doctor
 }
 
 default_env_path() {
@@ -866,9 +886,34 @@ install_schedule_if_requested() {
     run_cmd codex-backup schedule install --env-file "$env_file" --time "$schedule_time"
 }
 
+update_cli() {
+    env_file=$1
+
+    validate_update_mode_options
+    step "Update mode only refreshes the codex-backup CLI"
+    printf '  CLI install source: %s\n' "$install_mode"
+    if [ "$install_mode" = release ]; then
+        printf '  Release version: %s\n' "$release_version"
+        printf '  Managed bin dir: %s\n' "$(managed_bin_dir)"
+    else
+        printf '  Source checkout: %s\n' "$repo_root"
+        printf '  Cargo bin dir: %s\n' "$HOME/.cargo/bin"
+    fi
+    printf '  Environment file for doctor: %s\n' "$env_file"
+
+    install_cli_binary
+    run_doctor "$env_file"
+    step "codex-backup update script finished"
+}
+
 add_cargo_path
 add_managed_bin_path
 env_path=$(default_env_path)
+
+if [ "$update" -eq 1 ]; then
+    update_cli "$env_path"
+    exit 0
+fi
 
 resolve_interactive_install_plan "$env_path"
 

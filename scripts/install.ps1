@@ -3,6 +3,7 @@ param(
     [ValidateSet("Release", "Source")]
     [string]$InstallMode = "Release",
     [string]$ReleaseVersion = "latest",
+    [switch]$Update,
     [switch]$SkipDeps,
     [switch]$SkipInit,
     [switch]$ForceEnv,
@@ -410,6 +411,13 @@ function Install-CliFromSource {
 }
 
 function Install-Cli {
+    Install-CliBinary
+
+    Write-Step "Verifying codex-backup CLI startup"
+    Invoke-External "codex-backup" @("doctor")
+}
+
+function Install-CliBinary {
     if ($InstallMode -eq "Source") {
         Install-CliFromSource
     } else {
@@ -419,9 +427,6 @@ function Install-Cli {
             throw "Failed to install codex-backup from GitHub Release: $($_.Exception.Message) Re-run with -InstallMode Source to build from source with Rust."
         }
     }
-
-    Write-Step "Verifying codex-backup CLI startup"
-    Invoke-External "codex-backup" @("doctor")
 }
 
 function Get-DefaultEnvPath {
@@ -764,9 +769,50 @@ function Install-ScheduleIfRequested {
     Invoke-External "codex-backup" @("schedule", "install", "--env-file", $EnvPath, "--time", $ScheduleTime)
 }
 
+function Assert-UpdateModeOptions {
+    if (-not $Update) {
+        return
+    }
+
+    if ($ForceEnv) {
+        throw "Update mode cannot be combined with -ForceEnv because update mode does not rewrite .env."
+    }
+    if ($InstallSchedule) {
+        throw "Update mode cannot be combined with -InstallSchedule because update mode does not change schedules."
+    }
+    if ($ScheduleTimeExplicit) {
+        throw "Update mode cannot be combined with -ScheduleTime because update mode does not change schedules."
+    }
+}
+
+function Update-Cli {
+    param([string]$EnvPath)
+
+    Assert-UpdateModeOptions
+    Write-Step "Update mode only refreshes the codex-backup CLI"
+    Write-Host "  CLI install source: $InstallMode"
+    if ($InstallMode -eq "Release") {
+        Write-Host "  Release version: $ReleaseVersion"
+        Write-Host "  Managed bin dir: $(Get-ManagedBinDir)"
+    } else {
+        Write-Host "  Source checkout: $(Get-RepoRoot)"
+        Write-Host "  Cargo bin dir: $(Join-Path $HOME '.cargo\bin')"
+    }
+    Write-Host "  Environment file for doctor: $EnvPath"
+
+    Install-CliBinary
+    Run-Doctor $EnvPath
+    Write-Step "codex-backup update script finished"
+}
+
 Add-CargoPath
 Add-InstallBinPath
 $envPath = Get-DefaultEnvPath
+
+if ($Update) {
+    Update-Cli $envPath
+    exit 0
+}
 
 Resolve-InteractiveInstallPlan $envPath
 
