@@ -5,7 +5,12 @@ use anyhow::{Context, Result};
 use directories::{BaseDirs, ProjectDirs};
 
 const MANAGED_DIRECTORIES: &[&str] = &["sessions", "archived_sessions", "memories"];
-const MANAGED_FILES: &[&str] = &["session_index.jsonl", "history.jsonl"];
+const MANAGED_FILES: &[&str] = &[
+    "session_index.jsonl",
+    "history.jsonl",
+    ".codex-global-state.json",
+    ".codex-global-state.json.bak",
+];
 const EXCLUDED_PATHS: &[&str] = &[
     "auth.json",
     ".sandbox-secrets",

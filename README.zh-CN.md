@@ -13,6 +13,7 @@
 - `session_index.jsonl`
 - `history.jsonl`
 - `memories`
+- `.codex-global-state.json` 和 `.codex-global-state.json.bak` 中的工作区可见性状态
 - 根目录下的 `logs_*.sqlite` 和 `state_*.sqlite`
 
 SQLite 文件不会直接复制。工具会先用 SQLite online backup API 生成一致性快照，再把快照放入临时 staging 目录。
@@ -173,6 +174,11 @@ codex-backup doctor
 - Codex 目录是否存在
 - 系统 keyring 是否可用
 - 当前平台是否支持计划任务
+- 当前 `model_provider`、rollout metadata、`state_5.sqlite` 线程 metadata、
+  `.codex-global-state.json` 工作区根路径、`encrypted_content` 风险，以及
+  Codex Desktop 首屏 50 条会话限制下的项目可见性
+
+这些可见性诊断只读，不会改写 rollout 文件、SQLite、消息内容或 provider 设置。
 
 ## 初始化仓库
 
@@ -321,7 +327,7 @@ codex-backup restore --apply
 
 ## 安全边界
 
-这个工具只备份 Codex 的历史上下文和本地状态，不备份登录凭据、沙箱密钥、缓存或 worktrees。R2/S3 访问密钥只在使用远端仓库时需要，应放在本机 `.env` 或安全的运行环境中，不要提交到 Git。
+这个工具只备份 Codex 的历史上下文和本地状态，不备份登录凭据、沙箱密钥、缓存或 worktrees。`.codex-global-state.json` 会被纳入备份，因为它保存影响项目侧历史可见性的本机工作区根路径；它不是认证文件。R2/S3 访问密钥只在使用远端仓库时需要，应放在本机 `.env` 或安全的运行环境中，不要提交到 Git。
 
 受管理路径里的符号链接不会被跟随，避免备份意外采集 `~/.codex` 之外的文件。超大的受管理普通文件会带着 manifest warning 被跳过，而不是静默进入备份。
 

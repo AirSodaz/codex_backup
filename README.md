@@ -15,6 +15,7 @@ Included from the default Codex directory at `~/.codex`:
 - `session_index.jsonl`
 - `history.jsonl`
 - `memories`
+- `.codex-global-state.json` and `.codex-global-state.json.bak` workspace visibility state
 - root `logs_*.sqlite` and `state_*.sqlite` files through SQLite online backup
 
 Intentionally excluded:
@@ -169,6 +170,13 @@ Check local readiness:
 codex-backup doctor
 ```
 
+`doctor` also prints a read-only visibility diagnostic. It compares the current
+root `model_provider`, rollout metadata, `state_5.sqlite` thread metadata,
+workspace roots from `.codex-global-state.json`, encrypted-content risk, and
+the Codex Desktop first-page 50-session visibility window. It reports possible
+visibility causes only; it does not rewrite rollout files, SQLite rows, message
+history, or provider settings.
+
 The Rust CLI uses the platform credential store by default: Windows Credential
 Manager, macOS Keychain, or Linux Secret Service. For CI or headless runs, set
 `RESTIC_PASSWORD` or pass `--password-file`.
@@ -258,6 +266,9 @@ This tool backs up Codex history context and local state only. It does not back
 up login credentials, sandbox secrets, caches, or worktrees. The Restic
 repository password is independent from any R2/S3 credentials; losing it means
 existing encrypted snapshots cannot be restored.
+
+`.codex-global-state.json` is included because it stores local workspace roots
+that affect project-side history visibility. It is not an authentication file.
 
 Managed symlinks are never followed, which prevents a backup from accidentally
 capturing files outside `~/.codex`. Oversized managed files are skipped with a

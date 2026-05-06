@@ -12,6 +12,7 @@ use codex_backup::{
     staging::{
         create_staging, create_staging_with_policy, Manifest, StagingOptions, StagingPolicy,
     },
+    visibility::build_visibility_report,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -149,7 +150,9 @@ fn managed_and_excluded_paths_match_legacy_scope() {
             "archived_sessions",
             "memories",
             "session_index.jsonl",
-            "history.jsonl"
+            "history.jsonl",
+            ".codex-global-state.json",
+            ".codex-global-state.json.bak"
         ]
     );
 
@@ -170,6 +173,14 @@ fn staging_copies_managed_files_excludes_secrets_and_uses_sqlite_backup() {
     write_file(&source.join("memories/MEMORY.md"), "memory");
     write_file(&source.join("session_index.jsonl"), "index");
     write_file(&source.join("history.jsonl"), "history");
+    write_file(
+        &source.join(".codex-global-state.json"),
+        r#"{"electron-saved-workspace-roots":["C:\\work"]}"#,
+    );
+    write_file(
+        &source.join(".codex-global-state.json.bak"),
+        r#"{"electron-saved-workspace-roots":["C:\\work"]}"#,
+    );
     write_file(&source.join("auth.json"), "secret");
     write_file(&source.join(".sandbox-secrets/secret.txt"), "secret");
     write_file(&source.join("cache/blob.bin"), "cache");
@@ -205,6 +216,11 @@ fn staging_copies_managed_files_excludes_secrets_and_uses_sqlite_backup() {
     assert!(result.staging_dir.join("memories/MEMORY.md").exists());
     assert!(result.staging_dir.join("session_index.jsonl").exists());
     assert!(result.staging_dir.join("history.jsonl").exists());
+    assert!(result.staging_dir.join(".codex-global-state.json").exists());
+    assert!(result
+        .staging_dir
+        .join(".codex-global-state.json.bak")
+        .exists());
     assert!(result.staging_dir.join("sqlite/state_5.sqlite").exists());
     assert!(result.staging_dir.join("sqlite/logs_2.sqlite").exists());
     assert!(!result.staging_dir.join("auth.json").exists());
@@ -216,6 +232,12 @@ fn staging_copies_managed_files_excludes_secrets_and_uses_sqlite_backup() {
     assert_eq!(manifest.schema_version, 1);
     assert_eq!(manifest.backup_name, "codex-history");
     assert!(manifest.included_paths.contains(&"sessions".to_string()));
+    assert!(manifest
+        .included_paths
+        .contains(&".codex-global-state.json".to_string()));
+    assert!(manifest
+        .included_paths
+        .contains(&".codex-global-state.json.bak".to_string()));
     assert!(manifest.excluded_paths.contains(&"auth.json".to_string()));
     assert_eq!(manifest.sqlite_backups.len(), 2);
 
@@ -306,15 +328,27 @@ fn restore_apply_rolls_back_managed_files_and_sqlite_sidecars() {
 
     write_file(&restored.join("sessions/new.jsonl"), "new session");
     write_file(&restored.join("history.jsonl"), "new history");
+    write_file(
+        &restored.join(".codex-global-state.json"),
+        r#"{"electron-saved-workspace-roots":["C:\\new"]}"#,
+    );
     write_file(&restored.join("sqlite/state_5.sqlite"), "new sqlite");
     write_file(&codex_dir.join("sessions/old.jsonl"), "old session");
     write_file(&codex_dir.join("history.jsonl"), "old history");
+    write_file(
+        &codex_dir.join(".codex-global-state.json"),
+        r#"{"electron-saved-workspace-roots":["C:\\old"]}"#,
+    );
     write_file(&codex_dir.join("state_5.sqlite"), "old sqlite");
     write_file(&codex_dir.join("state_5.sqlite-wal"), "old wal");
     write_file(&codex_dir.join("state_5.sqlite-shm"), "old shm");
 
     let manifest = Manifest::for_test(
-        vec!["sessions".to_string(), "history.jsonl".to_string()],
+        vec![
+            "sessions".to_string(),
+            "history.jsonl".to_string(),
+            ".codex-global-state.json".to_string(),
+        ],
         vec![(
             "state_5.sqlite".to_string(),
             "sqlite/state_5.sqlite".to_string(),
@@ -343,14 +377,173 @@ fn restore_apply_rolls_back_managed_files_and_sqlite_sidecars() {
         "new history"
     );
     assert_eq!(
+        fs::read_to_string(codex_dir.join(".codex-global-state.json")).unwrap(),
+        r#"{"electron-saved-workspace-roots":["C:\\new"]}"#
+    );
+    assert_eq!(
         fs::read_to_string(codex_dir.join("state_5.sqlite")).unwrap(),
         "new sqlite"
     );
     assert!(result.rollback_dir.join("sessions/old.jsonl").exists());
     assert!(result.rollback_dir.join("history.jsonl").exists());
+    assert!(result
+        .rollback_dir
+        .join(".codex-global-state.json")
+        .exists());
     assert!(result.rollback_dir.join("state_5.sqlite").exists());
     assert!(result.rollback_dir.join("state_5.sqlite-wal").exists());
     assert!(result.rollback_dir.join("state_5.sqlite-shm").exists());
+}
+
+#[test]
+fn visibility_report_reads_provider_counts_and_encrypted_content_risk() {
+    let tmp = tempdir().unwrap();
+    let codex_dir = tmp.path().join(".codex");
+    write_file(
+        &codex_dir.join("config.toml"),
+        "model_provider = \"openai\"\n",
+    );
+    write_file(
+        &codex_dir.join("sessions/2026/05/rollout-a.jsonl"),
+        &format!(
+            "{}\n{}\n",
+            r#"{"type":"session_meta","payload":{"id":"thread-a","cwd":"C:\\work","model_provider":"apigather"}}"#,
+            r#"{"type":"event_msg","payload":{"encrypted_content":"gAAA"}}"#
+        ),
+    );
+    write_file(
+        &codex_dir.join("archived_sessions/2026/05/rollout-b.jsonl"),
+        r#"{"type":"session_meta","payload":{"id":"thread-b","cwd":"C:\\work","model_provider":"openai"}}"#,
+    );
+
+    let db = Connection::open(codex_dir.join("state_5.sqlite")).unwrap();
+    db.execute_batch(
+        r#"
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            model_provider TEXT,
+            cwd TEXT NOT NULL DEFAULT '',
+            archived INTEGER NOT NULL DEFAULT 0,
+            first_user_message TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO threads (id, model_provider, cwd, archived, first_user_message)
+            VALUES ('thread-a', 'apigather', 'C:\work', 0, 'hello');
+        INSERT INTO threads (id, model_provider, cwd, archived, first_user_message)
+            VALUES ('thread-b', 'openai', 'C:\work', 1, 'hello');
+        "#,
+    )
+    .unwrap();
+    drop(db);
+
+    let report = build_visibility_report(&codex_dir);
+    let rendered = codex_backup::visibility::render_visibility_report(&report);
+
+    assert_eq!(report.config_provider.provider, "openai");
+    assert!(!report.config_provider.implicit);
+    assert_eq!(report.rollout.sessions.get("apigather").copied(), Some(1));
+    assert_eq!(report.sqlite.sessions.get("apigather").copied(), Some(1));
+    assert!(rendered.contains("encrypted_content sessions: apigather: 1"));
+    assert!(rendered.contains("invalid_encrypted_content"));
+}
+
+#[test]
+fn visibility_report_uses_implicit_openai_provider_when_config_is_missing() {
+    let tmp = tempdir().unwrap();
+    let codex_dir = tmp.path().join(".codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+
+    let report = build_visibility_report(&codex_dir);
+    let rendered = codex_backup::visibility::render_visibility_report(&report);
+
+    assert_eq!(report.config_provider.provider, "openai");
+    assert!(report.config_provider.implicit);
+    assert!(rendered.contains("config provider: openai (implicit default)"));
+}
+
+#[test]
+fn visibility_report_reports_project_visibility_ranks_and_extended_paths() {
+    let tmp = tempdir().unwrap();
+    let codex_dir = tmp.path().join(".codex");
+    let project_root = r#"E:\GitHubProject\lin-framework"#;
+    write_file(
+        &codex_dir.join(".codex-global-state.json"),
+        &format!(
+            r#"{{"electron-saved-workspace-roots":["{}"]}}"#,
+            project_root.replace('\\', "\\\\")
+        ),
+    );
+
+    let db = Connection::open(codex_dir.join("state_5.sqlite")).unwrap();
+    db.execute_batch(
+        r#"
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            model_provider TEXT,
+            cwd TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'cli',
+            archived INTEGER NOT NULL DEFAULT 0,
+            first_user_message TEXT NOT NULL DEFAULT '',
+            updated_at_ms INTEGER NOT NULL DEFAULT 0
+        );
+        "#,
+    )
+    .unwrap();
+    for index in 0..51 {
+        db.execute(
+            "INSERT INTO threads (id, model_provider, cwd, updated_at_ms, first_user_message) VALUES (?1, 'openai', ?2, ?3, 'hello')",
+            (
+                format!("other-{index:02}"),
+                format!(r#"C:\other\{index:02}"#),
+                1000_i64 - index,
+            ),
+        )
+        .unwrap();
+    }
+    db.execute(
+        "INSERT INTO threads (id, model_provider, cwd, updated_at_ms, first_user_message) VALUES ('target', 'openai', ?1, 1, 'hello')",
+        (r#"\\?\E:\GitHubProject\lin-framework"#,),
+    )
+    .unwrap();
+    drop(db);
+
+    let report = build_visibility_report(&codex_dir);
+    let rendered = codex_backup::visibility::render_visibility_report(&report);
+
+    assert_eq!(report.project_visibility.len(), 1);
+    let project = &report.project_visibility[0];
+    assert_eq!(project.interactive_threads, 1);
+    assert_eq!(project.first_page_threads, 0);
+    assert_eq!(project.rank_preview, "52");
+    assert_eq!(project.exact_cwd_matches, 0);
+    assert_eq!(project.verbatim_cwd_rows, 1);
+    assert!(rendered.contains("first page 0/50"));
+    assert!(rendered.contains("ranks 52"));
+    assert!(rendered.contains("verbatim cwd 1"));
+}
+
+#[test]
+fn visibility_report_handles_missing_and_malformed_sqlite_without_failing() {
+    let tmp = tempdir().unwrap();
+    let missing_codex_dir = tmp.path().join("missing-sqlite");
+    fs::create_dir_all(&missing_codex_dir).unwrap();
+
+    let missing_report = build_visibility_report(&missing_codex_dir);
+    let missing_rendered = codex_backup::visibility::render_visibility_report(&missing_report);
+    assert!(!missing_report.sqlite.present);
+    assert!(missing_rendered.contains("state_5.sqlite: missing"));
+
+    let malformed_codex_dir = tmp.path().join("malformed-sqlite");
+    fs::create_dir_all(&malformed_codex_dir).unwrap();
+    write_file(
+        &malformed_codex_dir.join("state_5.sqlite"),
+        "not a sqlite db",
+    );
+
+    let malformed_report = build_visibility_report(&malformed_codex_dir);
+    let malformed_rendered = codex_backup::visibility::render_visibility_report(&malformed_report);
+    assert!(malformed_report.sqlite.present);
+    assert!(malformed_report.sqlite.unreadable);
+    assert!(malformed_rendered.contains("state_5.sqlite: unreadable"));
 }
 
 #[test]

@@ -15,6 +15,7 @@ use crate::restic::{
 use crate::restore::{apply_restore, find_restored_staging, ApplyRestoreOptions};
 use crate::schedule::{install_schedule, remove_schedule};
 use crate::staging::{create_staging, StagingOptions};
+use crate::visibility::{build_visibility_report, render_visibility_report};
 
 #[derive(Debug, Parser)]
 #[command(name = "codex-backup", version)]
@@ -305,6 +306,11 @@ fn doctor(args: CommonArgs) -> Result<()> {
         } else {
             "unsupported"
         }
+    );
+    println!();
+    print!(
+        "{}",
+        render_visibility_report(&build_visibility_report(&codex_dir))
     );
 
     Ok(())

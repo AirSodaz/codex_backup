@@ -6,3 +6,4 @@ pub mod restic;
 pub mod restore;
 pub mod schedule;
 pub mod staging;
+pub mod visibility;
