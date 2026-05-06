@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::Path;
 
+use clap::{error::ErrorKind, CommandFactory, Parser};
+use codex_backup::cli::Cli;
 use codex_backup::{
     config::{BackupConfig, RepositorySource},
     paths::{excluded_relative_paths, managed_relative_paths},
@@ -531,4 +533,20 @@ fn install_scripts_expose_planned_interfaces() {
     assert!(windows.contains("\"install\""));
     assert!(windows.contains("\"--path\""));
     assert!(git_attributes.contains("*.sh text eol=lf"));
+}
+
+#[test]
+fn cli_exposes_package_version_flags() {
+    let command = Cli::command();
+
+    assert_eq!(command.get_version(), Some(env!("CARGO_PKG_VERSION")));
+
+    for flag in ["--version", "-V"] {
+        let error = Cli::try_parse_from(["codex-backup", flag]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayVersion);
+
+        let output = error.to_string();
+        assert!(output.contains("codex-backup"));
+        assert!(output.contains(env!("CARGO_PKG_VERSION")));
+    }
 }

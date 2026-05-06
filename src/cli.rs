@@ -17,7 +17,7 @@ use crate::schedule::{install_schedule, remove_schedule};
 use crate::staging::{create_staging, StagingOptions};
 
 #[derive(Debug, Parser)]
-#[command(name = "codex-backup")]
+#[command(name = "codex-backup", version)]
 #[command(
     about = "Cross-platform Codex history backup tooling for local or remote Restic repositories"
 )]
